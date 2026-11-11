@@ -1,7 +1,6 @@
 // The popover above the footer (S1, Image #1): `Usage` · `all agents` with
 // refresh and Detailed | Compact, the Claude row with `Resets in` and its bars
-// (it opens the panel), `Usage details & history` (it opens details) and
-// `Manage Accounts…`. Orca's UsageRosterPanel.tsx; what it says is
+// (it opens the panel) and `Manage Accounts…`. Orca's UsageRosterPanel.tsx; what it says is
 // footer-model.js's, this file draws it. Owner: T6.
 //   props: { view: "popup", anchor, text, height } (popupSpec)
 //
@@ -12,7 +11,6 @@ import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { theme, openOverlay, closeOverlay, shared, setShared, settings } from "herdr";
 import { UsageView, readContract, claudeIcon, refreshButton, refreshIcon, usageBar, signInAccount } from "./footer.js";
-import { openDetails } from "./details.js";
 import { openAccounts } from "./accounts.js";
 import { UI_KEY, POPUP, usageMode, withUsageMode, popupModel, popupHeight, popupSpec, panelSpec, zoomOf, lastAnchor } from "./footer-model.js";
 
@@ -20,7 +18,7 @@ const CHEVRON = "mods/workspace-chrome/chevron-right.svg";
 // The Claude row's left column, where its metrics line up (Orca's pl-[30px]).
 const ROW_INDENT = 30;
 // What each link at its bottom opens.
-const LINKS = { details: () => openDetails(), accounts: () => openAccounts() };
+const LINKS = { accounts: () => openAccounts() };
 
 // The other opener is the footer's click, which already has the file. It
 // opens at the footer: its anchor from there, else the last one it drew at.

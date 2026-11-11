@@ -7,7 +7,6 @@
 //   panel           the Claude panel: the active account's card, the list
 //   accounts        Manage Accounts…: sign in, add, remove, switch mode (S2)
 //   confirm         Orca's "Switched to {account}" dialog (D8)
-//   details         Usage details & history, a window (S7)
 // This file is final (T1): each later task replaces only its own view file.
 // The logic is in the CLI (bin/claude-accounts): the views read its files
 // through store.js and run it with exec. Copies never reach into each other.
@@ -19,7 +18,6 @@ import Popup, { openPopup } from "./popup.js";
 import Panel, { openPanel } from "./panel.js";
 import Accounts, { openAccounts } from "./accounts.js";
 import Confirm, { openConfirm } from "./confirm.js";
-import Details, { openDetails } from "./details.js";
 
 // A copy without a view is the footer. scripts/check-views.sh rewrites this
 // line in a tmp copy, because herdr-app check draws only the default view.
@@ -31,7 +29,6 @@ const VIEWS = {
   panel: Panel,
   accounts: Accounts,
   confirm: Confirm,
-  details: Details,
 };
 
 // Every key command of the mod ("claude-accounts.<name>" in keys.json, or
@@ -43,7 +40,6 @@ const COMMANDS = {
   "open-panel": () => openPanel(),
   "open-accounts": () => openAccounts(),
   "open-confirm": () => openConfirm(),
-  "open-details": () => openDetails(),
   refresh: () => refreshUsage(),
 };
 

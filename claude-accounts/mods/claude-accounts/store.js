@@ -16,7 +16,6 @@
 //   readSettings(text)       settings.json     { switchMode }
 //   readRestart(text)        restart.json      { items: [...] }
 //   readPendingSwitch(text)  pending-switch.json, or null
-//   readDetails(text)        details.json      { ranges: {...} }
 //   readLoginLink(text)      login-link, a URL or null
 // classifyWatchPaths(root, paths): what a watchFolder batch on the state
 // folder asks for. "merge" when it holds the root itself (herdr.d.ts: a
@@ -32,7 +31,6 @@ export const FILES = Object.freeze({
   settings: "settings.json",
   restart: "restart.json",
   pendingSwitch: "pending-switch.json",
-  details: "details.json",
   loginLink: "login-link",
   live: "live",
 });
@@ -214,32 +212,6 @@ export function readPendingSwitch(text) {
     at: num(raw.at),
     sessions: Array.isArray(raw.sessions) ? raw.sessions.map(readSession).filter(Boolean) : [],
   };
-}
-
-// ── details.json (D2, D11) ─────────────────────────────────────────────────
-// { ranges: { "7"|"30"|"90"|"all": { result, running, startedAt, finishedAt,
-//   error } } }: always the four ranges, a missing one never run, any other
-// dropped. result is claude-usage --json's object as written (its shape is
-// claude-usage's, read by the details view), or null.
-
-const RANGES = ["7", "30", "90", "all"];
-
-function readRange(r) {
-  const raw = isObject(r) ? r : {};
-  return {
-    ...raw,
-    result: isObject(raw.result) ? raw.result : null,
-    running: raw.running === true,
-    startedAt: num(raw.startedAt),
-    finishedAt: num(raw.finishedAt),
-    error: str(raw.error),
-  };
-}
-
-export function readDetails(text) {
-  const raw = parseObject(text) ?? {};
-  const ranges = isObject(raw.ranges) ? raw.ranges : {};
-  return { ...raw, ranges: Object.fromEntries(RANGES.map((k) => [k, readRange(ranges[k])])) };
 }
 
 // ── login-link (D13) ───────────────────────────────────────────────────────

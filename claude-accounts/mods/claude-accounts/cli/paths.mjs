@@ -23,7 +23,6 @@ export const FILES = Object.freeze({
   restart: "restart.json",
   pendingSwitch: "pending-switch.json",
   live: "live",
-  details: "details.json",
   loginLink: "login-link",
   lock: "lock",
 });
@@ -80,11 +79,6 @@ export function orcaRoots(env = process.env) {
 // The usage endpoint (D4); tests point it at a local server.
 export function usageUrl(env = process.env) {
   return env.CLAUDE_ACCOUNTS_USAGE_URL || "https://api.anthropic.com/api/oauth/usage";
-}
-
-// claude-usage, by absolute path (D11); tests point it at a fake.
-export function usageBin(env = process.env) {
-  return env.CLAUDE_ACCOUNTS_USAGE_BIN || join(userHome(env), ".local", "bin", "claude-usage");
 }
 
 // This CLI's own bin, for the detached runners it spawns (D8, D11):

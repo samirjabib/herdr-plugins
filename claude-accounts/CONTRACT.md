@@ -292,11 +292,11 @@ code you don't know as a failure, as you read 1.
 ## Not part of the contract
 
 - The other commands (`remove`, `login`, `import-orca`, `settings`,
-  `restart`, `details`) serve this plugin's own views; their output can
+  `restart`) serve this plugin's own views; their output can
   change.
 - The other files in the state folder (`accounts.json`, `settings.json`,
   `usage-state.json`, `restart.json`, `pending-switch.json`, `live/`,
-  `details.json`, `login-link`, `lock/`): read `accounts.v1.json` instead.
+  `login-link`, `lock/`): read `accounts.v1.json` instead.
   One exception: agent-sleep reads `accounts.json` (a top-level array, each
   element's `configDir`) to find the folders a Claude's session file can be
   in.

@@ -22,7 +22,7 @@ const BIN = fileURLToPath(new URL("bin/claude-accounts", MOD));
 const source = (f) => readFileSync(new URL(f, MOD), "utf8");
 
 // The final command table (D9, T1's What), in its order.
-const COMMANDS = ["list", "use", "remove", "login", "import-orca", "settings", "usage", "terminal", "restart", "resume", "details"];
+const COMMANDS = ["list", "use", "remove", "login", "import-orca", "settings", "usage", "terminal", "restart", "resume"];
 
 // ── The sandbox ────────────────────────────────────────────────────────────
 
@@ -87,14 +87,13 @@ function assertExports(mod, names, where) {
 }
 
 const CLI_EXPORTS = {
-  paths: ["FILES", "stateHome", "profilesHome", "statePath", "defaultConfigDir", "usageUrl", "usageBin", "cliPath"],
+  paths: ["FILES", "stateHome", "profilesHome", "statePath", "defaultConfigDir", "usageUrl", "cliPath"],
   files: ["withLock", "writeAtomic", "readJson", "rebuildContract"],
   accounts: ["list", "use", "remove", "login", "importOrca", "settings", "knownAccounts"],
   usage: ["usage", "contractUsage"],
   keychain: ["keychainService", "readCredentials"],
   terminals: ["terminal", "inspectTerminal"],
   restart: ["restart", "resume", "afterUse"],
-  details: ["details"],
 };
 
 for (const [name, names] of Object.entries(CLI_EXPORTS)) {
@@ -105,8 +104,8 @@ for (const [name, names] of Object.entries(CLI_EXPORTS)) {
 
 // The mod's pure modules load outside Herdr (no herdr or gpui-kit import).
 const PURE_EXPORTS = {
-  format: ["formatPercent", "formatDuration", "formatResetsIn", "formatDate", "formatUpdated", "colorToken", "errorCopy", "densityLevel", "formatSince"],
-  store: ["MOD", "FILES", "stateDir", "cliPath", "readAccounts", "readSettings", "readRestart", "readPendingSwitch", "readDetails", "readLoginLink", "classifyWatchPaths"],
+  format: ["formatPercent", "formatDuration", "formatResetsIn", "formatDate", "formatUpdated", "colorToken", "errorCopy", "densityLevel"],
+  store: ["MOD", "FILES", "stateDir", "cliPath", "readAccounts", "readSettings", "readRestart", "readPendingSwitch", "readLoginLink", "classifyWatchPaths"],
   toasts: ["react"],
 };
 
@@ -124,7 +123,6 @@ const VIEWS = {
   panel: ["Panel", "openPanel"],
   accounts: ["Accounts", "openAccounts"],
   confirm: ["Confirm", "openConfirm"],
-  details: ["Details", "openDetails"],
 };
 
 for (const [view, [cls, fn]] of Object.entries(VIEWS)) {

@@ -17,7 +17,6 @@ import * as accounts from "./accounts.mjs";
 import * as usage from "./usage.mjs";
 import * as terminals from "./terminals.mjs";
 import * as restart from "./restart.mjs";
-import * as details from "./details.mjs";
 
 const VERSION = "0.1.0";
 
@@ -35,7 +34,6 @@ const COMMANDS = {
   terminal: terminals.terminal,
   restart: restart.restart,
   resume: restart.resume,
-  details: details.details,
 };
 
 const USAGE = [

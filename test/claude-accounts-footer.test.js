@@ -271,7 +271,7 @@ test("popover, Detailed: Usage · all agents · Detailed | Compact · Claude Res
     ["Fable", "22%", 22, "muted", "foreground"],
   ]);
   assert.equal(m.row.headline, null);
-  assert.deepEqual(m.links.map((l) => [l.id, l.label]), [["details", "Usage details & history"], ["accounts", "Manage Accounts…"]]);
+  assert.deepEqual(m.links.map((l) => [l.id, l.label]), [["accounts", "Manage Accounts…"]]);
 });
 
 test("popover, Compact: the row's tightest window on its right, no bars", () => {
@@ -1084,10 +1084,10 @@ async function popup(text = liveDoc(), mode = "verbose") {
   return { world, view: await overlay(Popup, spec, world) };
 }
 
-test("popover view (S1): Usage · all agents · refresh · Detailed | Compact · Claude Resets in 3h 2m · 5h wk Fable · its two links", async () => {
+test("popover view (S1): Usage · all agents · refresh · Detailed | Compact · Claude Resets in 3h 2m · 5h wk Fable · its link", async () => {
   const { view } = await popup();
   const root = view.render();
-  assert.equal(textOf(root), "Usage all agents Detailed Compact Claude Resets in 3h 2m 5h 41% wk 65% Fable 22% Usage details & history Manage Accounts…");
+  assert.equal(textOf(root), "Usage all agents Detailed Compact Claude Resets in 3h 2m 5h 41% wk 65% Fable 22% Manage Accounts…");
   assert.ok(find(root, "ca-popup-refresh"));
   assert.equal(find(root, "ca-popup-mode-verbose").calls.tooltip[0], "Full usage with bars, labels, and percentages");
   assert.ok(find(root, "ca-popup-mode-verbose").calls.font_medium, "Detailed is selected");
@@ -1105,16 +1105,15 @@ test("popover view: Detailed | Compact sets the footer's mode, and the row draws
   assert.doesNotMatch(text, /Resets in/);
 });
 
-test("popover view: the Claude row opens the panel where it was, then it closes; the links open their views", async () => {
+test("popover view: the Claude row opens the panel where it was, then it closes; the link opens its view", async () => {
   const { view, world } = await popup();
   find(view.render(), "ca-popup-row").handlers.click({}, world.cx);
   assert.deepEqual(world.log.map((x) => (x.open ? `open ${x.open.props.view}` : `close ${x.close}`)), ["open panel", "close ov-this"]);
   assert.deepEqual(world.opened()[0].props.anchor, ANCHOR);
 
   world.log.length = 0;
-  find(view.render(), "ca-popup-details").handlers.click({}, world.cx);
   find(view.render(), "ca-popup-accounts").handlers.click({}, world.cx);
-  assert.deepEqual(world.log.map((x) => (x.open ? `open ${x.open.props.view}` : `close ${x.close}`)), ["open details", "close ov-this", "open accounts", "close ov-this"]);
+  assert.deepEqual(world.log.map((x) => (x.open ? `open ${x.open.props.view}` : `close ${x.close}`)), ["open accounts", "close ov-this"]);
 });
 
 test("popover view, signed out: the row says not signed in, and a click opens the login in a tab", async () => {

@@ -5,8 +5,7 @@ of its session, weekly and Fable limits the active Claude account has used,
 and when each one resets. A popover and a panel show every account. Manage
 Accounts signs accounts in, adds and removes them, and picks which one new
 Claude terminals start on. When you switch accounts while Claude is running
-in terminals, those conversations can restart on the new account. A details
-window shows usage by model, project and account over 7, 30 or 90 days or all time.
+in terminals, those conversations can restart on the new account.
 
 All the logic is a command-line program, `claude-accounts`, that ships inside
 the mod. The mod only draws and runs it. Other plugins (Spotlight first) read
@@ -30,7 +29,7 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
 - **Popover** (above the footer): `Usage`, a refresh button and a
   `Detailed | Compact` toggle for the footer. Then the `Claude` row with
   "Resets in 3h 2m" and its `5h`, `wk` and `Fable` bars (it opens the
-  panel), `Usage details & history` and `Manage Accounts…`.
+  panel) and `Manage Accounts…`.
 - **Claude panel:** "Claude · Updated 3m ago" (or "Not yet updated"). The
   active account's card: Session, Weekly and Fable, each "N% used · Resets
   in …", plus the monthly spend and credits when the account has them. Then
@@ -67,20 +66,6 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
   "Claude in … is asking a question" with the question a restarted Claude
   stopped at, and "Sign-in link copied. Open it in a private window to sign
   in with a different account."
-- **Usage details & history** (a window): 7, 30 or 90 days or all time.
-  Orca's eight cards: input and output tokens, cache read, cache write, cache
-  reuse rate, zero-cache-read turns, sessions / turns, and the estimated
-  API-equivalent cost ("• excludes unpriced models" when some model has no
-  price); then total tokens and active time. Each group of figures says
-  "since <date>" when the range starts before its data does, with a note of
-  the share of tokens it covers when some sessions are gone from disk. Usage
-  by model and by project (sessions and turns) and by account; recent
-  sessions in Orca's columns (turns, input, output, cache), with the account
-  and length on hover; a daily chart; and how often and how fast each account
-  hits its 5-hour and weekly limits. A figure an older claude-usage doesn't
-  print reads "n/a". Opening it, picking a range or Refresh reads that range
-  again; the last result stays, with "Updated Xm ago", until the new one
-  lands. Orca's "Orca worktrees only" scope and share card aren't ported.
 
 **How it behaves**
 
@@ -190,7 +175,6 @@ scripts/install.sh claude-accounts
   launcher (a wrapper script on the PATH), which reads the `active` file.
 - Live numbers between polls need the statusline drop in
   `~/.claude/statusline.sh`.
-- Usage details & history runs `~/.local/bin/claude-usage --json`.
 - Node 22.15 or newer on the PATH Herdr's `exec` sees.
 
 **Built from**
@@ -201,13 +185,13 @@ scripts/install.sh claude-accounts
     also keeps the 15-minute timer and the watch on the state folder, and
     turns the CLI's progress into toasts (`toasts.js`).
   - `popup` = `popup.js`, `panel` = `panel.js`, `accounts` = `accounts.js`,
-    `confirm` = `confirm.js`, `details` = `details.js` (a window).
+    `confirm` = `confirm.js`.
   - Pure modules, tested with `node --test`: `store.js` (reading the CLI's
     files), `format.js` (percent, durations, dates, colors, error copy,
-    density, "since <date>" and the cache-coverage note), `footer-model.js`
+    density), `footer-model.js`
     (what the footer, popover and panel draw, and where they open),
-    `accounts-model.js` (what the accounts and confirm views draw),
-    `details-model.js` (what the details window draws) and `toasts.js`.
+    `accounts-model.js` (what the accounts and confirm views draw) and
+    `toasts.js`.
 - **CLI `mods/claude-accounts/bin/claude-accounts`** (Node, `cli/*.mjs`).
   Every command takes `--json`:
 
@@ -224,7 +208,6 @@ scripts/install.sh claude-accounts
   | `restart --cancel <t>` | cancels a terminal's restart or job that hasn't stopped Claude yet |
   | `restart --answer keep\|restart [--terminal <t>]...` | the switch dialog's answer: keep, or restart the ticked sessions |
   | `resume --terminal <t> --account <id\|default> [--message <text>] [--wait <s>]` | restarts one terminal on an account and sends a message; `--status <job>`, `--cancel <job>` |
-  | `details --range <7\|30\|90\|all>` | refreshes one range of the details window in the background: it returns at once, and a run already going is returned, not started twice |
   | `--version` | its version |
 
   Exit codes: 0 ok, 1 any other failure (a state file that can't be read,
@@ -236,8 +219,8 @@ scripts/install.sh claude-accounts
   code against (`accounts.v1.json`, and `list`, `usage`, `terminal`, `use`
   and `resume` with their output shapes) is [CONTRACT.md](CONTRACT.md).
 - **Commands:** `claude-accounts.open-popup`, `claude-accounts.open-panel`,
-  `claude-accounts.open-accounts`, `claude-accounts.open-confirm`,
-  `claude-accounts.open-details` and `claude-accounts.refresh`, reached
+  `claude-accounts.open-accounts`, `claude-accounts.open-confirm` and
+  `claude-accounts.refresh`, reached
   through the footer copy (`herdr-app do claude-accounts.<name>`).
 - **Herdr functions:** `exec`, `run`, `readTextFile`, `watchFolder`,
   `openOverlay`, `closeOverlay`, `notify`, `shared`, `setShared`, `settings`,
@@ -245,7 +228,7 @@ scripts/install.sh claude-accounts
 - **Programs the CLI runs:** `security find-generic-password` (reads a
   login, never writes one), `/usr/bin/sqlite3` (Orca's settings, read-only),
   `hc` (Herdr's terminals: list, read, type), `claude auth login`,
-  `claude-usage`, and HTTPS to `api.anthropic.com/api/oauth/usage`.
+  and HTTPS to `api.anthropic.com/api/oauth/usage`.
 
 **Files**
 
@@ -266,7 +249,6 @@ overwritten.
 | `restart.json` | the queued restarts and `resume` jobs, with their progress |
 | `pending-switch.json` | what the last switch found: the sessions on the previous account and the others (`mode` ask: the switch dialog's question; `mode` restart: the restart notice and its Review list) |
 | `live/` | the statusline's latest limits, one file per account |
-| `details.json` | the details window's last result per range, kept while a new run goes and after one fails |
 | `login-link` | a captured sign-in link |
 | `lock/` | the lock |
 
@@ -280,7 +262,7 @@ overwritten.
   shows "Usage unavailable" or stale numbers.
 - **A restart stops Claude.** It waits for idle first, but a half-typed
   prompt in that terminal is lost. Never restart (or Ask) avoids it.
-- **exec's 30 s limit:** restarts and the details refresh run in a detached
+- **exec's 30 s limit:** restarts run in a detached
   process, so a command returns at once and the work goes on.
 - **Orca shares the accounts.** Imported accounts are Orca's own folders, so
   signing in or out in either app affects both.
@@ -294,7 +276,7 @@ overwritten.
 
 - `node --test 'test/*.test.js'` reports `fail 0`, and
   `scripts/check-views.sh claude-accounts/mods/claude-accounts footer popup
-  panel accounts confirm details` prints `ok` for each view.
+  panel accounts confirm` prints `ok` for each view.
 - `claude-accounts list --json` shows System default and each Orca account,
   with the active one marked.
 - The footer shows the active account's session, weekly and Fable usage, and
@@ -302,4 +284,3 @@ overwritten.
   numbers.
 - Switching accounts with a Claude terminal open restarts it on the new
   account (Always restart) or asks first (Ask), and the conversation goes on.
-- Usage details & history shows every section for each range.

@@ -9,8 +9,7 @@
 //            label (usage-unit-label.tsx) and the signed-out action
 //            (InlineProviderUsage.tsx InlineUsageSignInAction)
 //   popover  UsageRosterPanel.tsx: Usage, all agents, refresh, Detailed |
-//            Compact, the Claude row (UsageRow), Usage details & history,
-//            Manage Accounts…
+//            Compact, the Claude row (UsageRow), Manage Accounts…
 //   panel    ClaudeSwitcherForOwner.tsx: ProviderIdentityCard (Claude,
 //            Updated Xm ago, the account's card from tooltip.tsx
 //            ProviderPanel and provider-extra-usage-section.tsx), then the
@@ -298,7 +297,6 @@ export function footerModel({ doc, mode = "verbose", width, now = Date.now() } =
 
 export const REFRESH_TIP = "Refresh rate limits";
 const LINKS = Object.freeze([
-  Object.freeze({ id: "details", label: "Usage details & history" }),
   Object.freeze({ id: "accounts", label: "Manage Accounts…" }),
 ]);
 
