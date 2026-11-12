@@ -33,6 +33,7 @@
 // pending switch is its readPendingSwitch(); settings its readSettings().
 
 import { formatDate } from "./format.js";
+import { PAY_PER_USE_TAG, isPayPerUse, autoSwitchSetting } from "./switch-model.js";
 
 const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v) => (typeof v === "string" && v.trim() !== "" ? v : null);
@@ -66,6 +67,11 @@ const SWITCH_OPTIONS = Object.freeze([
   { value: "keep", label: "Never restart" },
 ]);
 
+const REMOTE_OPTIONS = Object.freeze([
+  { value: "on", label: "On" },
+  { value: "off", label: "Off" },
+]);
+
 // A folder `login new` made (D3: <profiles>/<uuid>/home): Remove deletes
 // it. Any other folder (Orca's) stays: the CLI's ownFolder rule.
 const HERDR_FOLDER = /\/claude-accounts-profiles\/[0-9a-f-]{36}\/home$/i;
@@ -85,6 +91,7 @@ export function accountsModel({ accounts, settings, dismissed = null, signingIn 
   const defActive = active === "default";
   const saved = list.filter((a) => a !== def);
   const mode = SWITCH_OPTIONS.some((o) => o.value === settings?.switchMode) ? settings.switchMode : "ask";
+  const remote = settings?.remoteControl === "on" ? "on" : "off";
 
   const dupEmail = def && str(def.duplicateOf) && defEmail ? defEmail : null;
   const isDismissed = dupEmail && typeof dismissed === "string" && dismissed.trim().toLowerCase() === dupEmail.toLowerCase();
@@ -132,9 +139,15 @@ export function accountsModel({ accounts, settings, dismissed = null, signingIn 
       return {
         id: a.id,
         email: str(a.email) ?? str(a.label) ?? UNNAMED,
-        badges: isActive ? [THIS_DEVICE, "Active"] : [THIS_DEVICE],
+        // An Enterprise or Team login is billed per use (S3): said after its plan.
+        badges: [str(a.plan), isPayPerUse(a) ? PAY_PER_USE_TAG : null, THIS_DEVICE, isActive ? "Active" : null].filter(Boolean),
         subtitle: needsSignIn && !signedInAs ? "Sign in again to use this account" : [str(a.org), date].filter(Boolean).join(" · "),
         hint: signedInAs ? `Now signed in as ${signedInAs}` : null,
+        // S6: whether this account's own login is there, said on the row; the
+        // Sign in button shows only when it isn't (an expired token Claude
+        // refreshes on its own still counts as signed in).
+        status: !needsSignIn ? "Signed in" : signedInAs ? `Signed in as ${signedInAs}` : "Signed out",
+        signIn: needsSignIn ? "Sign in" : null,
         active: isActive,
         needsSignIn,
         // Orca disables picking an account that needs sign-in (the CLI's
@@ -150,6 +163,14 @@ export function accountsModel({ accounts, settings, dismissed = null, signingIn 
       valueLabel: SWITCH_OPTIONS.find((o) => o.value === mode).label,
       options: SWITCH_OPTIONS.map((o) => ({ ...o, selected: o.value === mode })),
     },
+    remote: {
+      title: "Reconnect Remote Control after a restart",
+      description: "Restarted sessions turn Remote Control back on with the new account, so the Claude app keeps them.",
+      value: remote,
+      valueLabel: REMOTE_OPTIONS.find((o) => o.value === remote).label,
+      options: REMOTE_OPTIONS.map((o) => ({ ...o, selected: o.value === remote })),
+    },
+    autoSwitch: autoSwitchSetting(settings),
     signInNote: signingIn ? signInNote(signingIn, list) : null,
   };
 }

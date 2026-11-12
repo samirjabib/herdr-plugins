@@ -28,6 +28,7 @@ import {
   popupSpec, panelSpec, signInTab, useFailure, reactState, withClosedAt, closedJustNow,
 } from "../claude-accounts/mods/claude-accounts/footer-model.js";
 import { react } from "../claude-accounts/mods/claude-accounts/toasts.js";
+import { formatUpdated } from "../claude-accounts/mods/claude-accounts/format.js";
 
 // The fixtures' "now": Nov 6 2026, 4:20 PM in Bogota.
 const NOW = 1794000000000;
@@ -56,6 +57,52 @@ test("activeAccount: the doc's active account, else System default", () => {
   assert.equal(activeAccount(docWith("default")).id, "default");
   assert.equal(activeAccount(docWith("no-such-id")).id, "default");
   assert.equal(activeAccount(readAccounts(null)), null);
+});
+
+// The saved account and System default can be the same login (duplicateOf).
+// Claudes started outside Herdr refresh only System default, so the saved
+// account's own numbers freeze and its past-reset 5h window disappears.
+function sameLoginDoc({ dupOf = "saved", defaultError = null, defaultAge = 60_000 } = {}) {
+  const week = NOW + 5 * 86_400_000;
+  return readAccounts(JSON.stringify({
+    version: 1,
+    active: "saved",
+    accounts: [
+      {
+        id: "default", label: "System default", email: "me@example.com", isDefault: true, duplicateOf: dupOf,
+        error: defaultError, needsSignIn: false, credits: null, usageUpdatedAt: NOW - defaultAge,
+        usage: { session: { percent: 31, resetsAt: NOW + 3_600_000 }, weekly: { percent: 12, resetsAt: week }, fable: { percent: 0, resetsAt: week }, monthly: null },
+      },
+      {
+        id: "saved", label: "me@example.com", email: "me@example.com", isDefault: false, duplicateOf: null,
+        error: "expired", needsSignIn: false, credits: null, usageUpdatedAt: NOW - 12 * 3_600_000,
+        usage: { session: null, weekly: { percent: 6, resetsAt: week }, fable: { percent: 0, resetsAt: week }, monthly: null },
+      },
+    ],
+  }));
+}
+
+test("activeAccount: a stale saved account shows System default's newer numbers for the same login", () => {
+  const a = activeAccount(sameLoginDoc());
+  assert.equal(a.id, "saved");
+  assert.equal(a.email, "me@example.com");
+  assert.equal(a.error, null);
+  assert.equal(a.usageUpdatedAt, NOW - 60_000);
+  assert.deepEqual(windowSections(a).map((s) => [s.key, s.percent]), [["session", 31], ["weekly", 12], ["fable", 0]]);
+  const panel = panelModel({ doc: sameLoginDoc(), now: NOW });
+  assert.equal(panel.updated, formatUpdated(NOW - 60_000, NOW));
+});
+
+test("activeAccount: keeps the saved account's own numbers when System default is another login, failing or older", () => {
+  for (const doc of [
+    sameLoginDoc({ dupOf: null }),
+    sameLoginDoc({ defaultError: "rateLimited" }),
+    sameLoginDoc({ defaultAge: 24 * 3_600_000 }),
+  ]) {
+    const a = activeAccount(doc);
+    assert.equal(a.error, "expired");
+    assert.deepEqual(windowSections(a).map((s) => [s.key, s.percent]), [["weekly", 6], ["fable", 0]]);
+  }
 });
 
 test("windowSections: Orca's order, Session, Weekly, Fable, Monthly, only the windows there", () => {
@@ -271,7 +318,7 @@ test("popover, Detailed: Usage · all agents · Detailed | Compact · Claude Res
     ["Fable", "22%", 22, "muted", "foreground"],
   ]);
   assert.equal(m.row.headline, null);
-  assert.deepEqual(m.links.map((l) => [l.id, l.label]), [["details", "Usage details & history"], ["accounts", "Manage Accounts…"]]);
+  assert.deepEqual(m.links.map((l) => [l.id, l.label]), [["accounts", "Manage Accounts…"]]);
 });
 
 test("popover, Compact: the row's tightest window on its right, no bars", () => {
@@ -638,7 +685,7 @@ test("pickNotify: only herdr's notify fields, and only with a title", () => {
 // its calls, a click is its handler called by hand, cx's sleeps return at once
 // and a watch wakes when a test says so.
 
-const HERDR = ["theme", "props", "run", "notify", "openOverlay", "closeOverlay", "exec", "readTextFile", "watchFolder", "shared", "setShared", "settings", "home", "appHome", "window", "nextCommand"];
+const HERDR = ["theme", "props", "run", "notify", "openOverlay", "closeOverlay", "exec", "readTextFile", "watchFolder", "shared", "setShared", "settings", "home", "appHome", "window", "nextCommand", "spaces", "agents", "keys"];
 const FAKES = {
   herdr: HERDR.map((n) => `export const ${n} = (...a) => globalThis.__caFake.${n}(...a);`).join("\n"),
   "gpui-kit": `const k = (n) => (...a) => globalThis.__caFake.el(n, ...a);
@@ -791,6 +838,9 @@ function newWorld({ files = {}, props = null, hasWindow = true } = {}) {
     appHome: () => "/fake/app",
     window: () => (w.hasWindow ? { platform: "macos" } : null),
     nextCommand: () => new Promise(() => {}),
+    spaces: () => w.spaces ?? [{ active: true, branch: "feat/x" }],
+    agents: () => w.agents ?? [{ status: "working" }, { status: "blocked" }],
+    keys: () => [{ section: "global", action: "app.palette", keys: "cmd-shift-p" }],
   };
   return w;
 }
@@ -798,6 +848,7 @@ function newWorld({ files = {}, props = null, hasWindow = true } = {}) {
 const { default: Footer, refreshUsage } = await import("../claude-accounts/mods/claude-accounts/footer.js");
 const { default: Popup, openPopup } = await import("../claude-accounts/mods/claude-accounts/popup.js");
 const { default: Panel, openPanel } = await import("../claude-accounts/mods/claude-accounts/panel.js");
+const { default: Status } = await import("../claude-accounts/mods/claude-accounts/status.js");
 
 // Numbers relative to the clock, because the views read Date.now() themselves.
 const H3M2 = (3 * 60 + 2) * MIN + 30_000;
@@ -1084,10 +1135,10 @@ async function popup(text = liveDoc(), mode = "verbose") {
   return { world, view: await overlay(Popup, spec, world) };
 }
 
-test("popover view (S1): Usage · all agents · refresh · Detailed | Compact · Claude Resets in 3h 2m · 5h wk Fable · its two links", async () => {
+test("popover view (S1): Usage · all agents · refresh · Detailed | Compact · Claude Resets in 3h 2m · 5h wk Fable · its link", async () => {
   const { view } = await popup();
   const root = view.render();
-  assert.equal(textOf(root), "Usage all agents Detailed Compact Claude Resets in 3h 2m 5h 41% wk 65% Fable 22% Usage details & history Manage Accounts…");
+  assert.equal(textOf(root), "Usage all agents Detailed Compact Claude Resets in 3h 2m 5h 41% wk 65% Fable 22% Manage Accounts…");
   assert.ok(find(root, "ca-popup-refresh"));
   assert.equal(find(root, "ca-popup-mode-verbose").calls.tooltip[0], "Full usage with bars, labels, and percentages");
   assert.ok(find(root, "ca-popup-mode-verbose").calls.font_medium, "Detailed is selected");
@@ -1105,16 +1156,15 @@ test("popover view: Detailed | Compact sets the footer's mode, and the row draws
   assert.doesNotMatch(text, /Resets in/);
 });
 
-test("popover view: the Claude row opens the panel where it was, then it closes; the links open their views", async () => {
+test("popover view: the Claude row opens the panel where it was, then it closes; the link opens its view", async () => {
   const { view, world } = await popup();
   find(view.render(), "ca-popup-row").handlers.click({}, world.cx);
   assert.deepEqual(world.log.map((x) => (x.open ? `open ${x.open.props.view}` : `close ${x.close}`)), ["open panel", "close ov-this"]);
   assert.deepEqual(world.opened()[0].props.anchor, ANCHOR);
 
   world.log.length = 0;
-  find(view.render(), "ca-popup-details").handlers.click({}, world.cx);
   find(view.render(), "ca-popup-accounts").handlers.click({}, world.cx);
-  assert.deepEqual(world.log.map((x) => (x.open ? `open ${x.open.props.view}` : `close ${x.close}`)), ["open details", "close ov-this", "open accounts", "close ov-this"]);
+  assert.deepEqual(world.log.map((x) => (x.open ? `open ${x.open.props.view}` : `close ${x.close}`)), ["open accounts", "close ov-this"]);
 });
 
 test("popover view, signed out: the row says not signed in, and a click opens the login in a tab", async () => {
@@ -1221,13 +1271,17 @@ test("accounts view (S8): the row draws its saved email, its org and date, then 
   await flush();
   const row = find(view.render(), `ca-accounts-row-${BEN}`);
   const text = textOf(row);
-  assert.ok(text.startsWith("ben@example.org This device Acme · "), text);
+  assert.ok(text.startsWith("ben@example.org This device Signed in as dee@example.com Acme · "), text);
   assert.ok(text.includes("Now signed in as dee@example.com"), text);
-  assert.ok(text.includes("Sign in again"), text);
-  assert.doesNotMatch(text, /Sign in again to use this account/);
+  assert.ok(text.includes("Sign in Remove"), text);
+  assert.doesNotMatch(text, /Sign in again/);
   assert.equal(find(row, `ca-accounts-pick-${BEN}`).handlers.click, undefined, "it can't be picked");
-  // An account with its own login draws no such line.
-  assert.doesNotMatch(textOf(find(view.render(), `ca-accounts-row-${ANA}`)), /Now signed in as/);
+  // An account with its own login draws no such line, says it's signed in
+  // and offers no Sign in button (S6).
+  const own = textOf(find(view.render(), `ca-accounts-row-${ANA}`));
+  assert.doesNotMatch(own, /Now signed in as/);
+  assert.match(own, /Signed in/);
+  assert.doesNotMatch(own, /Sign in Remove/);
 });
 
 test("panel view: opening it asks for the usage that's due", async () => {
@@ -1326,4 +1380,39 @@ test("panel view: without an overlay (herdr-app check) it runs nothing", async (
   assert.deepEqual(world.execs, []);
   assert.equal(world.watches.length, 0);
   assert.match(textOf(view.render()), /Not yet updated/);
+});
+
+// ── The status bar view ──────────────────────────────────────────────────────
+
+async function statusBar() {
+  const world = newWorld({ files: { "accounts.v1.json": liveDoc() } });
+  const view = new Status();
+  view.init({}, world.cx);
+  await flush();
+  return { world, view };
+}
+
+test("status view: the workspace, branch and agents, then the usage, then the commands hint last", async () => {
+  const { view, world } = await statusBar();
+  const root = view.render();
+  root.handlers.size_change({ width: 1400, height: 28 }, world.cx);
+  assert.equal(textOf(view.render()), "This computer feat/x 2 agents · 1 needs you Used 41% 3h 2m · 65% 4d 6h · 22% Fable ⌘⇧P  commands");
+  assert.ok(find(view.render(), "ca-footer-refresh"), "the refresh button");
+});
+
+test("status view: a narrow bar keeps the usage short, before the hint", async () => {
+  const { view, world } = await statusBar();
+  view.render().handlers.size_change({ width: 760, height: 28 }, world.cx);
+  assert.match(textOf(view.render()), /agents · 1 needs you Used 41% · 65% · 22% ⌘⇧P {2}commands$/);
+});
+
+test("status view: the usage opens the popover from its own bounds, the hint opens the palette, and it keeps the footer's merge", async () => {
+  const { view, world } = await statusBar();
+  assert.ok(world.execs.length >= 1, "it merges like the footer");
+  const usage = find(view.render(), "ca-status-usage");
+  usage.handlers.mouse_down({ bounds: { x: 600, y: 772, width: 220, height: 28 } }, world.cx);
+  find(usage, "ca-footer-usage").handlers.click({}, world.cx);
+  assert.deepEqual(world.opened()[0].props.anchor, { x: 610, y: 772, limit: 820 });
+  find(view.render(), "ca-status-palette").handlers.click({}, world.cx);
+  assert.deepEqual(world.log.at(-1), { run: "app.palette", args: undefined });
 });

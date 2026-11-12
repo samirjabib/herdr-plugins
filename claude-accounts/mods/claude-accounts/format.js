@@ -19,10 +19,6 @@
 //                                    (D4's table)
 //   densityLevel(width, needs)       the footer's level for its width (D10):
 //                                    "full", "compact" or "tightest"
-//   formatSince(date, now)           "since Nov 3", for cache figures that
-//                                    start after the range does (D11)
-//   formatCoverage(what, coverage)   the note for figures that cover only
-//                                    part of the range's tokens (D11)
 
 const MINUTE = 60_000;
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -206,33 +202,4 @@ export function densityLevel(width, needs = DENSITY_NEEDS) {
   if (full <= width + WIDTH_TOLERANCE_PX) return "full";
   if (compact <= width + WIDTH_TOLERANCE_PX) return "compact";
   return "tightest";
-}
-
-// ── Cache figures (D11) ────────────────────────────────────────────────────
-
-// "since Nov 3": the label of cache figures whose data starts after the
-// range does (claude-usage's cacheSince, a Bogota YYYY-MM-DD day). The year
-// is added when it isn't now's: "since Dec 28, 2025". null for anything but
-// a real day.
-export function formatSince(date, now = Date.now()) {
-  const m = typeof date === "string" ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(date) : null;
-  if (!m) return null;
-  const [year, month, day] = [Number(m[1]), Number(m[2]), Number(m[3])];
-  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
-  const sameYear = isNumber(now) && new Date(now).getFullYear() === year;
-  return `since ${MONTHS[month - 1]} ${day}${sameYear ? "" : `, ${year}`}`;
-}
-
-// The note under a group of figures that covers only part of the range's
-// tokens (claude-usage's totals.cacheCoverage, totals.turnFiguresCoverage:
-// 0–1): those figures come from sessions still on disk, as Orca's do, and the
-// note names them and says what share of the range that is. null when they
-// cover it all (1), or the range has no tokens (null). The share never reads
-// 100% while below 1, nor 0% above 0.
-export function formatCoverage(what, coverage) {
-  if (!isNumber(coverage) || coverage >= 1) return null;
-  const c = Math.max(0, coverage);
-  const pct = Math.round(c * 100);
-  const share = c > 0 && pct === 0 ? "<1" : String(Math.min(99, pct));
-  return `${what} cover only sessions still on disk: ${share}% of this range's tokens.`;
 }

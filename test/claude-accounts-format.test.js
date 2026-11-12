@@ -13,11 +13,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   formatPercent, formatDuration, formatResetsIn, formatDate, formatUpdated,
-  colorToken, errorCopy, densityLevel, formatSince, formatCoverage,
+  colorToken, errorCopy, densityLevel,
 } from "../claude-accounts/mods/claude-accounts/format.js";
 import {
   MOD, FILES, stateDir, cliPath,
-  readAccounts, readSettings, readRestart, readPendingSwitch, readDetails, readLoginLink,
+  readAccounts, readSettings, readRestart, readPendingSwitch, readLoginLink,
   classifyWatchPaths,
 } from "../claude-accounts/mods/claude-accounts/store.js";
 
@@ -210,29 +210,6 @@ test("densityLevel tightest: Orca's last level, one number in all, when not even
   assert.equal(densityLevel(200, { full: "wide", compact: null }), "compact");
 });
 
-test("formatSince: 'since <date>' from claude-usage's cacheSince day, the year added when it isn't now's; null for no day", () => {
-  assert.equal(formatSince("2026-11-03", NOW), "since Nov 3");
-  assert.equal(formatSince("2026-01-30", NOW), "since Jan 30");
-  assert.equal(formatSince("2025-12-28", NOW), "since Dec 28, 2025");
-  for (const bad of [null, undefined, "", "2026-13-01", "2026-11-00", "Nov 3", "2026-11-03T00:00:00Z", 20261103]) {
-    assert.equal(formatSince(bad, NOW), null, String(bad));
-  }
-});
-
-test("formatCoverage: below 1, the figures it names cover only sessions still on disk, with the share; null when they cover it all or there are no tokens", () => {
-  const note = (share) => `Cache figures cover only sessions still on disk: ${share}% of this range's tokens.`;
-  const cache = (coverage) => formatCoverage("Cache figures", coverage);
-  assert.equal(cache(0.7182), note("72"));
-  assert.equal(cache(0.631), note("63"));
-  assert.equal(cache(0.9996), note("99"));
-  assert.equal(cache(0.004), note("<1"));
-  assert.equal(cache(0), note("0"));
-  for (const none of [1, 1.2, null, undefined, NaN, "0.5"]) assert.equal(cache(none), null, String(none));
-  assert.equal(formatCoverage("Cost", 0.5), "Cost cover only sessions still on disk: 50% of this range's tokens.");
-});
-
-// ── store.js ───────────────────────────────────────────────────────────────
-
 test("store: the mod's folder name, the state folder's file names, and its paths", () => {
   assert.equal(MOD, "claude-accounts");
   assert.deepEqual({ ...FILES }, {
@@ -240,7 +217,6 @@ test("store: the mod's folder name, the state folder's file names, and its paths
     settings: "settings.json",
     restart: "restart.json",
     pendingSwitch: "pending-switch.json",
-    details: "details.json",
     loginLink: "login-link",
     live: "live",
   });
@@ -333,17 +309,22 @@ test("readAccounts fixture: System default plus two accounts, S1's numbers, the 
 // readSettings: settings.json.
 
 test("readSettings missing: no file, or not JSON, is Orca's default, ask", () => {
-  for (const text of [null, undefined, "", "nope", "[]"]) assert.deepEqual(readSettings(text), { switchMode: "ask" }, String(text));
+  for (const text of [null, undefined, "", "nope", "[]"]) assert.deepEqual(readSettings(text), { switchMode: "ask", remoteControl: "off" }, String(text));
+});
+
+test("readSettings: remoteControl is on or off, off for anything else", () => {
+  assert.equal(readSettings(JSON.stringify({ remoteControl: "on" })).remoteControl, "on");
+  for (const v of [undefined, "yes", true, null]) assert.equal(readSettings(JSON.stringify({ remoteControl: v })).remoteControl, "off", String(v));
 });
 
 test("readSettings partial: a missing or unknown switchMode is ask; other keys are kept", () => {
-  assert.deepEqual(readSettings("{}"), { switchMode: "ask" });
-  assert.deepEqual(readSettings(JSON.stringify({ switchMode: "always" })), { switchMode: "ask" });
-  assert.deepEqual(readSettings(JSON.stringify({ switchMode: "keep", later: true })), { switchMode: "keep", later: true });
+  assert.deepEqual(readSettings("{}"), { switchMode: "ask", remoteControl: "off" });
+  assert.deepEqual(readSettings(JSON.stringify({ switchMode: "always" })), { switchMode: "ask", remoteControl: "off" });
+  assert.deepEqual(readSettings(JSON.stringify({ switchMode: "keep", later: true })), { switchMode: "keep", later: true, remoteControl: "off" });
 });
 
 test("readSettings fixture: restart", () => {
-  assert.deepEqual(readSettings(fixture("settings.json")), { switchMode: "restart" });
+  assert.deepEqual(readSettings(fixture("settings.json")), { switchMode: "restart", remoteControl: "off" });
 });
 
 // readRestart: restart.json (D2, D8, D9).
@@ -435,44 +416,6 @@ test("readPendingSwitch fixture: from, to, at, and two onAccount, one elsewhere 
   assert.equal(got.sessions[0].title, "claude · herdr-plugins");
   assert.equal(got.sessions[2].account, "default");
   assert.equal(got.sessions[3].account, null);
-});
-
-// readDetails: details.json (D2, D11).
-
-const NEVER_RUN = { result: null, running: false, startedAt: null, finishedAt: null, error: null };
-
-test("readDetails missing: no file, or not JSON, has the four ranges, each never run", () => {
-  for (const text of [null, undefined, "", "{", "[]"]) {
-    assert.deepEqual(readDetails(text), { ranges: { 7: NEVER_RUN, 30: NEVER_RUN, 90: NEVER_RUN, all: NEVER_RUN } }, String(text));
-  }
-});
-
-test("readDetails partial: a missing range is never run, an unknown one dropped; a result that isn't an object is null", () => {
-  const got = readDetails(JSON.stringify({
-    ranges: {
-      7: { result: { version: 1, totals: { tokens: 5 } }, running: "yes", startedAt: 1, finishedAt: 2 },
-      30: { result: "garbage", running: true, error: 42 },
-      365: { result: { version: 1 } },
-    },
-  }));
-  assert.deepEqual(Object.keys(got.ranges), ["7", "30", "90", "all"]);
-  assert.deepEqual(got.ranges[7], { result: { version: 1, totals: { tokens: 5 } }, running: false, startedAt: 1, finishedAt: 2, error: null });
-  assert.deepEqual(got.ranges[30], { result: null, running: true, startedAt: null, finishedAt: null, error: null });
-  assert.deepEqual(got.ranges[90], NEVER_RUN);
-  assert.deepEqual(got.ranges.all, NEVER_RUN);
-  assert.deepEqual(readDetails(JSON.stringify({ ranges: [] })).ranges.all, NEVER_RUN);
-});
-
-test("readDetails fixture: 7 done with claude-usage's JSON as written, 30 running, 90 failed, all never run", () => {
-  const text = fixture("details.json");
-  const got = readDetails(text);
-  assert.deepEqual(got.ranges[7].result, JSON.parse(text).ranges[7].result);
-  assert.equal(got.ranges[7].running, false);
-  assert.equal(got.ranges[7].finishedAt, 1793999952000);
-  assert.deepEqual(got.ranges[30], { result: null, running: true, startedAt: 1793999990000, finishedAt: null, error: null });
-  assert.equal(got.ranges[90].error, "claude-usage exited 1: no usage-cache.jsonl");
-  assert.equal(got.ranges[90].running, false);
-  assert.deepEqual(got.ranges.all, NEVER_RUN);
 });
 
 // readLoginLink: login-link (D13).

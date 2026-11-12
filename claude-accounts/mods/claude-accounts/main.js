@@ -3,23 +3,27 @@
 //   (none), footer  the usage in the sidebar's status row (S1). The copy that
 //                   always lives: the only one that reads key commands, and
 //                   the one that keeps the timer and the watch (T6).
+//   status          Herdr's status bar with the usage before the palette
+//                   hint; a footer in another frame, so it listens too
 //   popup           the popover above the footer
 //   panel           the Claude panel: the active account's card, the list
 //   accounts        Manage Accounts…: sign in, add, remove, switch mode (S2)
 //   confirm         Orca's "Switched to {account}" dialog (D8)
-//   details         Usage details & history, a window (S7)
+//   move            Move this session to…: one terminal to another account (S4)
 // This file is final (T1): each later task replaces only its own view file.
 // The logic is in the CLI (bin/claude-accounts): the views read its files
 // through store.js and run it with exec. Copies never reach into each other.
 
 import { View, div } from "gpui-kit";
-import { props, nextCommand } from "herdr";
+import { props, nextCommand, focused, terminals } from "herdr";
 import Footer, { refreshUsage } from "./footer.js";
+import Status from "./status.js";
 import Popup, { openPopup } from "./popup.js";
 import Panel, { openPanel } from "./panel.js";
 import Accounts, { openAccounts } from "./accounts.js";
 import Confirm, { openConfirm } from "./confirm.js";
-import Details, { openDetails } from "./details.js";
+import Move, { openMove } from "./move.js";
+import { moveTarget } from "./move-model.js";
 
 // A copy without a view is the footer. scripts/check-views.sh rewrites this
 // line in a tmp copy, because herdr-app check draws only the default view.
@@ -27,11 +31,12 @@ const DEFAULT_VIEW = "footer";
 
 const VIEWS = {
   footer: Footer,
+  status: Status,
   popup: Popup,
   panel: Panel,
   accounts: Accounts,
   confirm: Confirm,
-  details: Details,
+  move: Move,
 };
 
 // Every key command of the mod ("claude-accounts.<name>" in keys.json, or
@@ -43,7 +48,8 @@ const COMMANDS = {
   "open-panel": () => openPanel(),
   "open-accounts": () => openAccounts(),
   "open-confirm": () => openConfirm(),
-  "open-details": () => openDetails(),
+  // The focused terminal, read when the key is pressed (S4).
+  "move-session": () => openMove(moveTarget(focused(), terminals())),
   refresh: () => refreshUsage(),
 };
 
@@ -54,7 +60,7 @@ export default class ClaudeAccounts extends View {
     const V = VIEWS[this.name];
     this.view = V ? new V() : null;
     this.view?.init?.(pr, cx);
-    if (this.name === "footer") this.listen(cx);
+    if (this.name === "footer" || this.name === "status") this.listen(cx);
   }
 
   listen(cx) {

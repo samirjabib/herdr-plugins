@@ -49,6 +49,7 @@ change without notice.
 | `label` | string | What to show: `"System default"`, or the account's email. |
 | `email` | string or null | The email the account was saved with (see `signedInAs` when its folder holds another login); System default's login, null when it has none. |
 | `org` | string or null | The organization's name. |
+| `plan` | string or null | The login's plan, for people: `Max 5x`, `Max 20x`, `Max`, `Pro`, `Team` or `Enterprise`; null when there's no login or Claude names a plan this doesn't know. Added in place, so version stays 1. |
 | `configDir` | string or null | Its Claude config folder, the exact `CLAUDE_CONFIG_DIR` its Claude runs with (never normalized). Null for System default. |
 | `isDefault` | boolean | True for System default only. |
 | `needsSignIn` | boolean | Its login is missing or lapsed, or its folder holds someone else's (`signedInAs`): Claude can't run on this account until you sign in again (the plugin shows "Sign in again"). |
@@ -172,6 +173,10 @@ still holds its own login, and `needsSignIn` is true from the last usage
 read) is selected, as in Orca, and its card asks you to sign in again, while
 `resume` to it exits 5.
 
+When the owner turns the automatic switch on, the plugin switches through
+this same path on its own (to a Max or Pro account only), so `active` can
+change without a click; read the file again rather than caching it.
+
 ### `resume --terminal <t> --account <id|default> [--message <text>] [--wait <s>] --json`
 
 Restarts the Claude in terminal `<t>` on an account, continuing its
@@ -292,11 +297,11 @@ code you don't know as a failure, as you read 1.
 ## Not part of the contract
 
 - The other commands (`remove`, `login`, `import-orca`, `settings`,
-  `restart`, `details`) serve this plugin's own views; their output can
+  `restart`) serve this plugin's own views; their output can
   change.
 - The other files in the state folder (`accounts.json`, `settings.json`,
   `usage-state.json`, `restart.json`, `pending-switch.json`, `live/`,
-  `details.json`, `login-link`, `lock/`): read `accounts.v1.json` instead.
+  `login-link`, `lock/`): read `accounts.v1.json` instead.
   One exception: agent-sleep reads `accounts.json` (a top-level array, each
   element's `configDir`) to find the folders a Claude's session file can be
   in.

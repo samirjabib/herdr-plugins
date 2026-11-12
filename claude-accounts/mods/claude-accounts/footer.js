@@ -12,7 +12,8 @@
 //   waits SETTLE first, so one write's events come as one batch;
 // - on each re-read, toasts.react and its result: notify, the confirm view,
 //   the sign-in link on the clipboard. What was shown is in
-//   shared("claude-accounts.seen").
+//   shared("claude-accounts.seen"). The moves "Move this session to…" started
+//   are in shared("claude-accounts.moves"), so their jobs get toasts too.
 // A click on it opens the popover above it; the mode (Detailed | Compact) is
 // the shared UI value the popover sets (D12).
 //
@@ -27,7 +28,9 @@ import { h_flex } from "gpui-base";
 import { theme, exec, run, notify, openOverlay, closeOverlay, readTextFile, watchFolder, shared, setShared, settings, props, home, appHome, window as appWindow } from "herdr";
 import { FILES, stateDir, cliPath, readAccounts, classifyWatchPaths } from "./store.js";
 import { react } from "./toasts.js";
+import { AUTO_SWITCH_FILE } from "./switch-model.js";
 import { openConfirm } from "./confirm.js";
+import { MOVES_KEY } from "./move-model.js";
 import {
   UI_KEY, SEEN_KEY, FOOTER, MERGE_ARGS, REFRESH_ARGS, REFRESH_TIP, usageMode, footerModel, popupSpec, zoomOf, footerBounds, anchorFrom,
   rememberAnchor, lastAnchor, reactState, applyReact, signInTab, withClosedAt, closedJustNow,
@@ -305,9 +308,9 @@ export default class Footer extends UsageView {
 
   // The files again, and what they have to say to the person (D1).
   async reread(cx) {
-    const [restart, pending, link] = await Promise.all([FILES.restart, FILES.pendingSwitch, FILES.loginLink].map(readState));
+    const [restart, pending, link, autoSwitch] = await Promise.all([FILES.restart, FILES.pendingSwitch, FILES.loginLink, AUTO_SWITCH_FILE].map(readState));
     if (await this.reload()) cx.notify();
-    const r = applyReact(react, reactState({ doc: this.doc, restart, pending, link, now: Date.now() }), shared(SEEN_KEY));
+    const r = applyReact(react, reactState({ doc: this.doc, restart, pending, link, autoSwitch, moves: shared(MOVES_KEY), now: Date.now() }), shared(SEEN_KEY));
     if (r.seen) setShared(SEEN_KEY, r.seen);
     for (const n of r.notify) notify(n);
     if (r.openConfirm) openConfirm();

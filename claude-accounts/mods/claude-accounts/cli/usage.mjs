@@ -20,6 +20,9 @@
 //
 // forgetUsage(home, id): a successful sign-in empties that account's entry.
 //
+// After its reads, `usage` runs autoswitch.checkAutoSwitch (S2): with the
+// setting on, an active account at the line moves to the one with most room.
+//
 // parseUsageResponse(data) → { usage, credits }: the endpoint's JSON in
 // Orca's order (claude-oauth-usage-request.ts, claude-usage-window.ts,
 // claude-usage-credits.ts), plus D4's limits[] fallback for session and
@@ -52,6 +55,7 @@ import { FILES, stateHome, usageUrl } from "./paths.mjs";
 import { failure, isAlive, readJson, rebuildContract, render, withLock, writeAtomic } from "./files.mjs";
 import { knownAccounts, sameLogin } from "./accounts.mjs";
 import { readCredentials } from "./keychain.mjs";
+import { checkAutoSwitch } from "./autoswitch.mjs";
 
 // ── Orca's numbers (service/service-types.ts, claude-oauth-usage-request.ts) ─
 
@@ -623,6 +627,13 @@ export async function usage(args) {
     finished = done.every(Boolean);
   } finally {
     clearTimeout(timer);
+  }
+  // Every poll and every turn's merge checks the automatic switch (S2). It
+  // never fails the read.
+  try {
+    await checkAutoSwitch(stateHome());
+  } catch (e) {
+    process.stderr.write(`claude-accounts usage: the automatic switch didn't run (${e?.message ?? e})\n`);
   }
   const doc = await rebuildContract(stateHome());
   process.stdout.write(values.json ? render(doc) : `${doc.accounts.map((a) => describeAccount(a, doc.active)).join("\n")}\n`);

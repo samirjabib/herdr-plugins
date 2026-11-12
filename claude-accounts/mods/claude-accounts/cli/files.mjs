@@ -179,6 +179,7 @@ function contractAccount(account, usage) {
     label: account.isDefault ? "System default" : (account.email ?? account.id),
     email: account.email ?? null,
     org: account.org ?? null,
+    plan: account.plan ?? null,
     configDir: account.isDefault ? null : (account.configDir ?? null),
     isDefault: account.isDefault === true,
     // A folder with no login, or someone else's, needs one whatever usage says

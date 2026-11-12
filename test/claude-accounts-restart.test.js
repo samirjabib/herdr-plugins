@@ -41,6 +41,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { moveArgs, moveStarted } from "../claude-accounts/mods/claude-accounts/move-model.js";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
 const SRC = join(repo, "claude-accounts/mods/claude-accounts");
@@ -281,7 +282,7 @@ if (cmd === "ls") {
 let n = 0;
 let shellPids = 2_000_000; // above macOS's pid_max: never a real process
 
-function sandbox({ active = A, switchMode = "ask", timing = {} } = {}) {
+function sandbox({ active = A, switchMode = "ask", remoteControl, timing = {} } = {}) {
   const box = join(root, `s${++n}`);
   const home = join(box, "home");
   const state = join(box, "state");
@@ -338,7 +339,7 @@ function sandbox({ active = A, switchMode = "ask", timing = {} } = {}) {
   ].map(([id, email]) => ({ id, email, org: null, orgUuid: null, configDir: dirs[id], lastAuthenticatedAt: 1, source: "orca" }));
   writeFileSync(join(state, "accounts.json"), `${JSON.stringify(registry, null, 2)}\n`);
   writeFileSync(join(state, "active"), active === "default" ? "" : dirs[active]);
-  writeFileSync(join(state, "settings.json"), JSON.stringify({ switchMode }));
+  writeFileSync(join(state, "settings.json"), JSON.stringify({ switchMode, ...(remoteControl ? { remoteControl } : {}) }));
 
   // A folder no account has: an Orca profile the registry doesn't list.
   const stray = join(home, "Library", "Application Support", "Orca Dev", "claude-profiles", "dddddddd-4444-4444-8444-444444444444", "home");
@@ -1383,6 +1384,44 @@ test("resume and restart --cancel take a terminal's name: one terminal named two
   assert.ok(alive(t1.pid), "Claude wasn't stopped");
 });
 
+test("Move this session to… (S4): the dialog's command moves only that terminal; active and every other terminal stay; `use` still switches", async () => {
+  const s = sandbox({ active: A, switchMode: "keep" });
+  const t1 = s.term("t1", { on: A });
+  const t2 = s.term("t2", { on: A });
+  const t3 = s.term("t3", { on: B });
+  const before = s.active();
+  const target = { terminal: "t1", title: "claude · t1" };
+  const r = await s.exec(moveArgs("t1", B));
+  const started = moveStarted({ code: r.status, stdout: r.stdout, stderr: r.stderr }, { accounts: s.json(["list"]), target, id: B });
+  assert.equal(started.error, null, r.stderr);
+  assert.match(started.job, /^rs-[0-9a-f]{8}$/);
+  assert.equal((await s.final(started.job)).state, "done");
+  assert.equal(s.json(["terminal", "t1"]).account, B, "t1 moved");
+  assert.equal(s.active(), before, "the active account is unchanged");
+  assert.deepEqual(s.queue().map((i) => [i.kind, i.terminal]), [["resume", "t1"]], "one job, for t1 only");
+  assert.ok(alive(t2.pid) && alive(t3.pid), "t2 and t3 kept their Claude");
+  assert.deepEqual([s.sends("t2"), s.sends("t3")], [[], []], "nothing typed into t2 or t3");
+  assert.equal(s.json(["terminal", "t2"]).account, A);
+  assert.equal(s.json(["terminal", "t3"]).account, B);
+
+  // A terminal that isn't Claude, or has nothing to resume: the CLI's own words, and no job.
+  s.shell("t4");
+  s.term("t5", { on: A, transcript: false });
+  for (const [t, words] of [["t4", "Terminal t4 isn't running Claude."], ["t5", /^There's no conversation to resume yet in terminal t5/]]) {
+    const no = await s.exec(moveArgs(t, B));
+    const m = moveStarted({ code: no.status, stdout: no.stdout, stderr: no.stderr }, { accounts: null, target: { terminal: t, title: null }, id: B });
+    assert.equal(m.job, null);
+    if (typeof words === "string") assert.equal(m.error, words);
+    else assert.match(m.error, words);
+  }
+  assert.equal(s.queue().length, 1, "no job was queued for t4 or t5");
+
+  // `use` is as before: it switches the active account (Never restart leaves the terminals).
+  assert.equal(s.json(["use", B]).to, B);
+  assert.equal(s.active(), s.dirs[B]);
+  assert.deepEqual(s.sends("t2"), []);
+});
+
 test("the typed line: CLAUDE_ACCOUNTS_DIR and every kept arg survive a real shell exactly; injections and the first prompt are gone", async () => {
   const s = sandbox();
   const argv = [
@@ -2016,6 +2055,8 @@ test("keptArgs: D8's allowlist", async () => {
     [["claude", "--model", "opus", "--add-dir=/mine"], ["--model", "opus", "--add-dir=/mine"]],
     [["claude", "--model"], []],
     [["claude", "--", "--model", "opus"], []],
+    [["claude", "--remote-control"], ["--remote-control"]],
+    [["claude", "--remote-control", "phone", "--model", "opus"], ["--remote-control", "--model", "opus"]],
   ];
   for (const [argv, kept] of cases) assert.deepEqual(keptArgs(argv), kept, JSON.stringify(argv));
 });
@@ -2032,6 +2073,24 @@ test("shellQuote and resumeLine: bare when safe, single-quoted otherwise", async
   assert.equal(shellQuote("*"), "'*'");
   assert.equal(resumeLine("", [], "abc"), "CLAUDE_ACCOUNTS_DIR='' claude --resume abc");
   assert.equal(resumeLine("/p q/home", ["--model", "opus"], "abc"), "CLAUDE_ACCOUNTS_DIR='/p q/home' claude --model opus --resume abc");
+  assert.equal(resumeLine("", [], "abc", { remoteControl: true }), "CLAUDE_ACCOUNTS_DIR='' claude --remote-control --resume abc");
+  assert.equal(resumeLine("", ["--remote-control"], "abc", { remoteControl: true }), "CLAUDE_ACCOUNTS_DIR='' claude --remote-control --resume abc", "never twice");
+});
+
+test("remoteControl on: a restarted session comes back with --remote-control, on the new account; off, the line is as before", async () => {
+  const on = sandbox({ remoteControl: "on" });
+  const t1 = on.term("t1", { on: A });
+  const { job } = on.json(["resume", "--terminal", "t1", "--account", B]);
+  assert.equal((await on.final(job)).state, "done");
+  const [typed] = on.typed("t1");
+  assert.equal(typed.dir, on.dirs[B]);
+  assert.deepEqual(typed.args, ["--remote-control", "--resume", t1.sessionId]);
+
+  const off = sandbox();
+  const t2 = off.term("t2", { on: A });
+  const second = off.json(["resume", "--terminal", "t2", "--account", B]);
+  assert.equal((await off.final(second.job)).state, "done");
+  assert.deepEqual(off.typed("t2")[0].args, ["--resume", t2.sessionId]);
 });
 
 // ── Last: what every test left behind ──────────────────────────────────────

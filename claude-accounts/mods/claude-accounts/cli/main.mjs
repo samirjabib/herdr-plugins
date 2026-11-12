@@ -17,7 +17,7 @@ import * as accounts from "./accounts.mjs";
 import * as usage from "./usage.mjs";
 import * as terminals from "./terminals.mjs";
 import * as restart from "./restart.mjs";
-import * as details from "./details.mjs";
+import * as autoswitch from "./autoswitch.mjs";
 
 const VERSION = "0.1.0";
 
@@ -35,7 +35,7 @@ const COMMANDS = {
   terminal: terminals.terminal,
   restart: restart.restart,
   resume: restart.resume,
-  details: details.details,
+  "auto-switch": autoswitch.autoSwitchCommand,
 };
 
 const USAGE = [

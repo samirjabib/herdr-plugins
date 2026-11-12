@@ -18,7 +18,6 @@ which is signed in as the same email as a saved account.
 | `accounts.v1.json` | the published state other plugins read (`claude-accounts/CONTRACT.md`) |
 | `restart.json` | switch items and `resume` jobs, one per state worth reading: queued, waitingIdle (claimed), done, failed, timeout, cancelled |
 | `pending-switch.json` | an Ask (`mode: "ask"`) waiting for the confirm view: two sessions `onAccount`, one `elsewhere`, one `cantMove` |
-| `details.json` | the details cache: range 7 done, 30 running, 90 failed, `all` never run |
 | `login-link` | a captured sign-in URL, no newline |
 | `live/5ba6c07f.json` | a statusline drop for `ana@example.com` (the file name is sha256 of its config dir, first 8 hex) |
 
@@ -35,17 +34,3 @@ it writes a session file.
 |---|---|
 | `external-imports-dialog.txt` | A real terminal (read 2026-11-09) left at "Allow external CLAUDE.md file imports?" after a switch restarted it. Its top line is a border, and an older, wider render of the same dialog sits above the live one. The import's path is replaced with `/tmp/scratch/other-repo/AGENTS.md`. |
 | `trust-dialog.txt` | The folder trust dialog ("Accessing workspace:"), copied from `agent-sleep/test/fixtures/claude-trust-dialog.txt`. Its cursor is indented one space, not two. |
-
-## `claude-usage.json`
-
-One `claude-usage --json --last 7` result (usage details & history): every
-section, a project whose transcript is gone (`path: null`, named by its
-slug), cache figures that start after the range does (`cacheSince`), and
-cache figures that cover only part of the range's tokens (`cacheCoverage`
-0.7182).
-Its token counts add up across `daily`, `byAccount`, `byModel` and
-`byProject`.
-D24's figures too: turn figures (zero-cache-read turns and cost) that start
-later still (`turnFiguresSince`) and cover less (`turnFiguresCoverage`
-0.6504), sessions and turns per model and per project, and a recent session
-from a pre-v4 line, whose input, output, cache read and cache write are null.
