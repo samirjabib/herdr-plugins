@@ -141,7 +141,8 @@
 // run again. Final items are pruned 24 h after they ended.
 //
 // keptArgs(argv): D8's allowlist over Claude's foreground argv.
-// shellQuote(s), resumeLine(dir, args, sessionId): the typed line.
+// shellQuote(s), resumeLine(dir, args, sessionId, { remoteControl }): the
+// typed line; with remoteControl (the setting) it carries --remote-control.
 // screenReason(screen, line): what the typed line left on the screen.
 //
 // Test seam: CLAUDE_ACCOUNTS_RESTART_TIMING, a JSON object of milliseconds
@@ -221,8 +222,9 @@ export function shellQuote(value) {
 // dir: the target's exact config dir, "" for System default (the launcher's
 // rule 1: set, even empty, wins over `active`; empty means CLAUDE_CONFIG_DIR
 // unset).
-export function resumeLine(dir, args, sessionId) {
-  return [`CLAUDE_ACCOUNTS_DIR=${shellQuote(dir)}`, "claude", ...args.map(shellQuote), "--resume", shellQuote(sessionId)].join(" ");
+export function resumeLine(dir, args, sessionId, { remoteControl = false } = {}) {
+  const all = remoteControl && !args.includes(REMOTE_FLAG) ? [REMOTE_FLAG, ...args] : args;
+  return [`CLAUDE_ACCOUNTS_DIR=${shellQuote(dir)}`, "claude", ...all.map(shellQuote), "--resume", shellQuote(sessionId)].join(" ");
 }
 
 // D8's kept args: Orca rebuilds `claude [--effort] --resume <id>`; this keeps
@@ -230,7 +232,10 @@ export function resumeLine(dir, args, sessionId) {
 // (a first prompt) and every other flag is dropped, so a resumed agent never
 // gets its first task again; so are the launcher's own injections: its
 // leading --mcp-config=… and the --add-dir=… right after them.
-const KEEP_FLAGS = new Set(["--dangerously-skip-permissions"]);
+// --remote-control is kept bare: a session that had it keeps it on the new
+// account, under a fresh name (its old name is a positional, dropped).
+const REMOTE_FLAG = "--remote-control";
+const KEEP_FLAGS = new Set(["--dangerously-skip-permissions", REMOTE_FLAG]);
 const KEEP_OPTIONS = new Set(["--model", "--permission-mode", "--effort", "--settings", "--add-dir"]);
 
 export function keptArgs(argv) {
@@ -263,6 +268,12 @@ export function keptArgs(argv) {
     }
   }
   return kept;
+}
+
+// What the settings add to the typed line, read when it's typed.
+async function lineOptions(home) {
+  const { remoteControl } = await readSettings(home);
+  return { remoteControl: remoteControl === "on" };
 }
 
 // ── restart.json (D2's pinned shape) ────────────────────────────────────────
@@ -920,7 +931,7 @@ async function runItem(home, id, t) {
         // sleeping terminal.
         const slept = quit !== null && ["stopping", "asleep"].includes(await sleepState(item.terminal));
         if (!slept && quit?.sessionId && (await hasTranscript(quit.configDir ?? configDirOf(known, item.to), quit.sessionId))) {
-          line = resumeLine(targetDir(known, item.to), quit.args, quit.sessionId);
+          line = resumeLine(targetDir(known, item.to), quit.args, quit.sessionId, await lineOptions(home));
           const stopping = await toStopping(home, id, item, { from: quit.account, sessionId: quit.sessionId, args: quit.args });
           if (stopping === null) return;
           if (stopping !== "skip") {
@@ -978,7 +989,7 @@ async function runItem(home, id, t) {
         return;
       }
       const args = keptArgs(found.argv);
-      line = resumeLine(targetDir(known, item.to), args, found.sessionId);
+      line = resumeLine(targetDir(known, item.to), args, found.sessionId, await lineOptions(home));
       const told = item.kind === "switch" ? relaunchMessage(labelOf(known, item.to), found.agents, turn?.backgroundAgents ?? 0) : null;
       // A new turn may have begun since (a background agent reporting
       // back): read it once more right before the step that can't be

@@ -505,6 +505,22 @@ test("accounts: S2's setting, with Orca's title, help text and three choices", (
   assert.equal(accountsModel({ accounts: accounts(), settings: readSettings(null) }).setting.valueLabel, "Ask", "Orca's default");
 });
 
+test("accounts: the Remote Control setting, Off by default, On when settings.json says so", () => {
+  const off = accountsModel({ accounts: accounts(), settings: readSettings(null) });
+  assert.deepEqual(off.remote, {
+    title: "Reconnect Remote Control after a restart",
+    description: "Restarted sessions turn Remote Control back on with the new account, so the Claude app keeps them.",
+    value: "off",
+    valueLabel: "Off",
+    options: [
+      { value: "on", label: "On", selected: false },
+      { value: "off", label: "Off", selected: true },
+    ],
+  });
+  const on = accountsModel({ accounts: accounts(), settings: readSettings(JSON.stringify({ remoteControl: "on" })) });
+  assert.equal(on.remote.valueLabel, "On");
+});
+
 test("accounts: Orca's duplicate notice for an active System default, until dismissed for that email", () => {
   const active = () => ({ ...accounts(), active: "default" });
   const m = accountsModel({ accounts: active(), settings: readSettings(null) });

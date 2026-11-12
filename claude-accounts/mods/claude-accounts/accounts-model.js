@@ -66,6 +66,11 @@ const SWITCH_OPTIONS = Object.freeze([
   { value: "keep", label: "Never restart" },
 ]);
 
+const REMOTE_OPTIONS = Object.freeze([
+  { value: "on", label: "On" },
+  { value: "off", label: "Off" },
+]);
+
 // A folder `login new` made (D3: <profiles>/<uuid>/home): Remove deletes
 // it. Any other folder (Orca's) stays: the CLI's ownFolder rule.
 const HERDR_FOLDER = /\/claude-accounts-profiles\/[0-9a-f-]{36}\/home$/i;
@@ -85,6 +90,7 @@ export function accountsModel({ accounts, settings, dismissed = null, signingIn 
   const defActive = active === "default";
   const saved = list.filter((a) => a !== def);
   const mode = SWITCH_OPTIONS.some((o) => o.value === settings?.switchMode) ? settings.switchMode : "ask";
+  const remote = settings?.remoteControl === "on" ? "on" : "off";
 
   const dupEmail = def && str(def.duplicateOf) && defEmail ? defEmail : null;
   const isDismissed = dupEmail && typeof dismissed === "string" && dismissed.trim().toLowerCase() === dupEmail.toLowerCase();
@@ -149,6 +155,13 @@ export function accountsModel({ accounts, settings, dismissed = null, signingIn 
       value: mode,
       valueLabel: SWITCH_OPTIONS.find((o) => o.value === mode).label,
       options: SWITCH_OPTIONS.map((o) => ({ ...o, selected: o.value === mode })),
+    },
+    remote: {
+      title: "Reconnect Remote Control after a restart",
+      description: "Restarted sessions turn Remote Control back on with the new account, so the Claude app keeps them.",
+      value: remote,
+      valueLabel: REMOTE_OPTIONS.find((o) => o.value === remote).label,
+      options: REMOTE_OPTIONS.map((o) => ({ ...o, selected: o.value === remote })),
     },
     signInNote: signingIn ? signInNote(signingIn, list) : null,
   };

@@ -174,6 +174,15 @@ export default class Accounts {
     this.act(cx, "mode", ["settings", "set", "switchMode", mode, "--json"]);
   }
 
+  setRemote(cx, value) {
+    if (value === this.settings.remoteControl) {
+      this.menu = null;
+      cx.notify();
+      return;
+    }
+    this.act(cx, "remote", ["settings", "set", "remoteControl", value, "--json"]);
+  }
+
   confirmRemove(cx) {
     const id = this.removing;
     this.removing = null;
@@ -263,6 +272,7 @@ export default class Accounts {
             .children(m.rows.map((row) => this.accountRow(t, m, row)))))
         .child(div().h(1).bg(t.border))
         .child(this.settingRow(t, m.setting))
+        .child(this.settingRow(t, m.remote, "remote", (cx, v) => this.setRemote(cx, v)))
         .when(Boolean(this.error), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(this.error ?? ""))));
     return root.child(header).child(body);
   }
@@ -317,23 +327,24 @@ export default class Accounts {
   }
 
   // S2's setting: its title and Orca's help text, and a ▾ menu of the three.
-  settingRow(t, s) {
-    const open = this.menu === "mode";
-    const trigger = h_flex().id("ca-accounts-mode").w(150).h(28).px(10).gap(6).items_center().rounded(7).border_1()
+  // The Remote Control setting draws the same way, with its own menu.
+  settingRow(t, s, key = "mode", set = (cx, v) => this.setMode(cx, v)) {
+    const open = this.menu === key;
+    const trigger = h_flex().id(`ca-accounts-${key}`).w(150).h(28).px(10).gap(6).items_center().rounded(7).border_1()
       .border_color(t.input).bg(t.raised).cursor_pointer().hover((st) => st.bg(t.hover))
-      .child(div().flex_1().min_w(0).truncate().child(this.busy === "mode" ? "Saving…" : s.valueLabel))
+      .child(div().flex_1().min_w(0).truncate().child(this.busy === key ? "Saving…" : s.valueLabel))
       .child(svg(CHEVRON).size(12).flex_none().text_color(t.dim));
     const content = this.menuList(t, s.options.map((o) => ({
-      id: `ca-accounts-mode-${o.value}`,
+      id: `ca-accounts-${key}-${o.value}`,
       label: o.label,
       checked: o.selected,
-      run: (cx) => this.setMode(cx, o.value),
+      run: (cx) => set(cx, o.value),
     })), 150);
     return h_flex().gap(16).items_center()
       .child(v_flex().flex_1().min_w(0).gap(2)
         .child(div().font_medium().child(s.title))
         .child(div().text_size(11.5).text_color(t.dim).child(s.description)))
-      .child(this.popover("ca-accounts-mode-menu", "mode", open, !this.busy, trigger, content));
+      .child(this.popover(`ca-accounts-${key}-menu`, key, open, !this.busy, trigger, content));
   }
 
   // Remove's question, in place of the list (Orca's dialog over its pane).

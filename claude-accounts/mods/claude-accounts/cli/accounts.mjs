@@ -10,6 +10,8 @@
 //   login <id|new|default> [--link] claude auth login in this tab (D3, D13)
 //   import-orca                     Orca's profiles, again (D3)
 //   settings [set switchMode <v>]   ask | restart | keep
+//   settings [set remoteControl <v>] on | off: restarted sessions come back
+//                                   with --remote-control
 //
 // The registry (accounts.json) is created on first use: every command that
 // reads it, knownAccounts included, imports Orca's accounts first when the
@@ -45,6 +47,9 @@ import { forgetUsage } from "./usage.mjs";
 const execFileP = promisify(execFile);
 
 export const SWITCH_MODES = Object.freeze(["ask", "restart", "keep"]);
+export const REMOTE_CONTROL = Object.freeze(["on", "off"]);
+// Each setting the `settings set` command takes, and its values.
+const SETTING_VALUES = { switchMode: SWITCH_MODES, remoteControl: REMOTE_CONTROL };
 
 // Orca's copy, word for word (main/claude-accounts/claude-account-selection.ts,
 // claude-account-registration.ts, shared/claude-sign-in-link.ts), with
@@ -173,7 +178,10 @@ export async function readSettings(home = stateHome()) {
   if (typeof value !== "object" || Array.isArray(value)) {
     throw failure(`${path} is not an object ({"switchMode": ...}). Fix it or move it away: claude-accounts never overwrites it.`);
   }
-  return { switchMode: SWITCH_MODES.includes(value.switchMode) ? value.switchMode : "ask" };
+  return {
+    switchMode: SWITCH_MODES.includes(value.switchMode) ? value.switchMode : "ask",
+    remoteControl: value.remoteControl === "on" ? "on" : "off",
+  };
 }
 
 // ── Orca (D3) ───────────────────────────────────────────────────────────────
@@ -455,12 +463,12 @@ export async function settings(args) {
   if (positionals.length === 0) {
     await ensureRegistry(home);
     const current = await readSettings(home);
-    print(values.json, current, `switchMode: ${current.switchMode}`);
+    print(values.json, current, `switchMode: ${current.switchMode}\nremoteControl: ${current.remoteControl}`);
     return 0;
   }
   const [verb, key, mode] = positionals;
-  if (positionals.length !== 3 || verb !== "set" || key !== "switchMode" || !SWITCH_MODES.includes(mode)) {
-    throw usageError(`settings [set switchMode ${SWITCH_MODES.join("|")}]`);
+  if (positionals.length !== 3 || verb !== "set" || !Object.hasOwn(SETTING_VALUES, key) || !SETTING_VALUES[key].includes(mode)) {
+    throw usageError(`settings [set switchMode ${SWITCH_MODES.join("|")} | set remoteControl ${REMOTE_CONTROL.join("|")}]`);
   }
   // The first run seeds settings.json from Orca, so it comes before the set.
   await ensureRegistry(home);
@@ -470,9 +478,9 @@ export async function settings(args) {
     if (typeof current !== "object" || Array.isArray(current)) {
       throw failure(`${path} is not an object ({"switchMode": ...}). Fix it or move it away: claude-accounts never overwrites it.`);
     }
-    await writeAtomic(path, render({ ...current, switchMode: mode }));
+    await writeAtomic(path, render({ ...current, [key]: mode }));
   });
-  print(values.json, { switchMode: mode }, `switchMode: ${mode}`);
+  print(values.json, { [key]: mode }, `${key}: ${mode}`);
   return 0;
 }
 

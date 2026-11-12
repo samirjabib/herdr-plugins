@@ -57,6 +57,10 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
   - The setting **When you switch accounts while Claude is running in
     terminals**, "Restarting continues each terminal conversation on the new
     account.": Ask, Always restart or Never restart.
+  - "Reconnect Remote Control after a restart": On or Off (Off by default).
+    On, every restarted session comes back with `--remote-control`, signed in
+    as the new account, so it stays in the Claude app on your phone. A
+    session started with `--remote-control` keeps it either way.
 - **Switch dialog** (Ask): "Switched to {account}", the sessions still
   running on the previous account with a checkbox each: each shows its last
   prompt, its terminal's title, and whether it's Working or Idle, live. Then "Don't ask again
@@ -208,6 +212,7 @@ scripts/install.sh claude-accounts
   | `login <id\|new\|default> [--link]` | signs an account in, in the current terminal |
   | `import-orca` | imports Orca's accounts again |
   | `settings [set switchMode ask\|restart\|keep]` | reads or sets the switch setting |
+  | `settings set remoteControl on\|off` | restarted sessions come back with `--remote-control` (on) or as they were (off) |
   | `usage [--refresh] [--force] [--account <id>]` | the usage, fetched when due; `--force` has no floor (`use` runs it for the new account) |
   | `terminal <t>` | a Herdr terminal's account, session and status |
   | `restart --cancel <t>` | cancels a terminal's restart or job that hasn't stopped Claude yet |

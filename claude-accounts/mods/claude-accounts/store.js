@@ -13,7 +13,7 @@
 // Fields a reader doesn't know are kept as written, so a field the CLI adds
 // later (D9: adding fields keeps version 1) still reaches the views.
 //   readAccounts(text)       accounts.v1.json (D9)
-//   readSettings(text)       settings.json     { switchMode }
+//   readSettings(text)       settings.json     { switchMode, remoteControl }
 //   readRestart(text)        restart.json      { items: [...] }
 //   readPendingSwitch(text)  pending-switch.json, or null
 //   readLoginLink(text)      login-link, a URL or null
@@ -135,7 +135,7 @@ const SWITCH_MODES = ["ask", "restart", "keep"];
 
 export function readSettings(text) {
   const raw = parseObject(text) ?? {};
-  return { ...raw, switchMode: oneOf(SWITCH_MODES, raw.switchMode) ?? "ask" };
+  return { ...raw, switchMode: oneOf(SWITCH_MODES, raw.switchMode) ?? "ask", remoteControl: raw.remoteControl === "on" ? "on" : "off" };
 }
 
 // ── restart.json (D2, D8, D9) ──────────────────────────────────────────────

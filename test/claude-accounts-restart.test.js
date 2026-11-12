@@ -281,7 +281,7 @@ if (cmd === "ls") {
 let n = 0;
 let shellPids = 2_000_000; // above macOS's pid_max: never a real process
 
-function sandbox({ active = A, switchMode = "ask", timing = {} } = {}) {
+function sandbox({ active = A, switchMode = "ask", remoteControl, timing = {} } = {}) {
   const box = join(root, `s${++n}`);
   const home = join(box, "home");
   const state = join(box, "state");
@@ -338,7 +338,7 @@ function sandbox({ active = A, switchMode = "ask", timing = {} } = {}) {
   ].map(([id, email]) => ({ id, email, org: null, orgUuid: null, configDir: dirs[id], lastAuthenticatedAt: 1, source: "orca" }));
   writeFileSync(join(state, "accounts.json"), `${JSON.stringify(registry, null, 2)}\n`);
   writeFileSync(join(state, "active"), active === "default" ? "" : dirs[active]);
-  writeFileSync(join(state, "settings.json"), JSON.stringify({ switchMode }));
+  writeFileSync(join(state, "settings.json"), JSON.stringify({ switchMode, ...(remoteControl ? { remoteControl } : {}) }));
 
   // A folder no account has: an Orca profile the registry doesn't list.
   const stray = join(home, "Library", "Application Support", "Orca Dev", "claude-profiles", "dddddddd-4444-4444-8444-444444444444", "home");
@@ -2016,6 +2016,8 @@ test("keptArgs: D8's allowlist", async () => {
     [["claude", "--model", "opus", "--add-dir=/mine"], ["--model", "opus", "--add-dir=/mine"]],
     [["claude", "--model"], []],
     [["claude", "--", "--model", "opus"], []],
+    [["claude", "--remote-control"], ["--remote-control"]],
+    [["claude", "--remote-control", "phone", "--model", "opus"], ["--remote-control", "--model", "opus"]],
   ];
   for (const [argv, kept] of cases) assert.deepEqual(keptArgs(argv), kept, JSON.stringify(argv));
 });
@@ -2032,6 +2034,24 @@ test("shellQuote and resumeLine: bare when safe, single-quoted otherwise", async
   assert.equal(shellQuote("*"), "'*'");
   assert.equal(resumeLine("", [], "abc"), "CLAUDE_ACCOUNTS_DIR='' claude --resume abc");
   assert.equal(resumeLine("/p q/home", ["--model", "opus"], "abc"), "CLAUDE_ACCOUNTS_DIR='/p q/home' claude --model opus --resume abc");
+  assert.equal(resumeLine("", [], "abc", { remoteControl: true }), "CLAUDE_ACCOUNTS_DIR='' claude --remote-control --resume abc");
+  assert.equal(resumeLine("", ["--remote-control"], "abc", { remoteControl: true }), "CLAUDE_ACCOUNTS_DIR='' claude --remote-control --resume abc", "never twice");
+});
+
+test("remoteControl on: a restarted session comes back with --remote-control, on the new account; off, the line is as before", async () => {
+  const on = sandbox({ remoteControl: "on" });
+  const t1 = on.term("t1", { on: A });
+  const { job } = on.json(["resume", "--terminal", "t1", "--account", B]);
+  assert.equal((await on.final(job)).state, "done");
+  const [typed] = on.typed("t1");
+  assert.equal(typed.dir, on.dirs[B]);
+  assert.deepEqual(typed.args, ["--remote-control", "--resume", t1.sessionId]);
+
+  const off = sandbox();
+  const t2 = off.term("t2", { on: A });
+  const second = off.json(["resume", "--terminal", "t2", "--account", B]);
+  assert.equal((await off.final(second.job)).state, "done");
+  assert.deepEqual(off.typed("t2")[0].args, ["--resume", t2.sessionId]);
 });
 
 // ── Last: what every test left behind ──────────────────────────────────────

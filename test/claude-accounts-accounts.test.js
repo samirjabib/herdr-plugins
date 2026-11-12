@@ -782,7 +782,7 @@ test("settings reads and sets switchMode; a bad value exits 64 and writes nothin
   const s = sandbox();
   const r = s.cli(["settings", "--json"]);
   assert.equal(r.status, 0, r.stderr);
-  assert.deepEqual(JSON.parse(r.stdout), { switchMode: "ask" });
+  assert.deepEqual(JSON.parse(r.stdout), { switchMode: "ask", remoteControl: "off" });
   const set = s.cli(["settings", "set", "switchMode", "restart", "--json"]);
   assert.equal(set.status, 0, set.stderr);
   assert.deepEqual(JSON.parse(set.stdout), { switchMode: "restart" });
@@ -790,6 +790,19 @@ test("settings reads and sets switchMode; a bad value exits 64 and writes nothin
   assert.equal(s.cli(["settings", "set", "switchMode", "sometimes"]).status, 64);
   assert.equal(s.cli(["settings", "set", "colour", "red"]).status, 64);
   assert.deepEqual(JSON.parse(s.read("settings.json")), { switchMode: "restart" });
+});
+
+test("settings sets remoteControl on or off, keeps switchMode, and refuses anything else", () => {
+  const s = sandbox();
+  assert.equal(JSON.parse(s.cli(["settings", "--json"]).stdout).remoteControl, "off", "off by default");
+  s.cli(["settings", "set", "switchMode", "restart"]);
+  const set = s.cli(["settings", "set", "remoteControl", "on", "--json"]);
+  assert.equal(set.status, 0, set.stderr);
+  assert.deepEqual(JSON.parse(set.stdout), { remoteControl: "on" });
+  assert.deepEqual(JSON.parse(s.read("settings.json")), { switchMode: "restart", remoteControl: "on" });
+  assert.deepEqual(JSON.parse(s.cli(["settings", "--json"]).stdout), { switchMode: "restart", remoteControl: "on" });
+  assert.equal(s.cli(["settings", "set", "remoteControl", "yes"]).status, 64);
+  assert.deepEqual(JSON.parse(s.read("settings.json")), { switchMode: "restart", remoteControl: "on" });
 });
 
 // ── accounts.v1.json and CONTRACT.md (D9) ──────────────────────────────────

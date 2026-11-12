@@ -309,17 +309,22 @@ test("readAccounts fixture: System default plus two accounts, S1's numbers, the 
 // readSettings: settings.json.
 
 test("readSettings missing: no file, or not JSON, is Orca's default, ask", () => {
-  for (const text of [null, undefined, "", "nope", "[]"]) assert.deepEqual(readSettings(text), { switchMode: "ask" }, String(text));
+  for (const text of [null, undefined, "", "nope", "[]"]) assert.deepEqual(readSettings(text), { switchMode: "ask", remoteControl: "off" }, String(text));
+});
+
+test("readSettings: remoteControl is on or off, off for anything else", () => {
+  assert.equal(readSettings(JSON.stringify({ remoteControl: "on" })).remoteControl, "on");
+  for (const v of [undefined, "yes", true, null]) assert.equal(readSettings(JSON.stringify({ remoteControl: v })).remoteControl, "off", String(v));
 });
 
 test("readSettings partial: a missing or unknown switchMode is ask; other keys are kept", () => {
-  assert.deepEqual(readSettings("{}"), { switchMode: "ask" });
-  assert.deepEqual(readSettings(JSON.stringify({ switchMode: "always" })), { switchMode: "ask" });
-  assert.deepEqual(readSettings(JSON.stringify({ switchMode: "keep", later: true })), { switchMode: "keep", later: true });
+  assert.deepEqual(readSettings("{}"), { switchMode: "ask", remoteControl: "off" });
+  assert.deepEqual(readSettings(JSON.stringify({ switchMode: "always" })), { switchMode: "ask", remoteControl: "off" });
+  assert.deepEqual(readSettings(JSON.stringify({ switchMode: "keep", later: true })), { switchMode: "keep", later: true, remoteControl: "off" });
 });
 
 test("readSettings fixture: restart", () => {
-  assert.deepEqual(readSettings(fixture("settings.json")), { switchMode: "restart" });
+  assert.deepEqual(readSettings(fixture("settings.json")), { switchMode: "restart", remoteControl: "off" });
 });
 
 // readRestart: restart.json (D2, D8, D9).
