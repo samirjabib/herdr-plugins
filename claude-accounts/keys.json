@@ -1,0 +1,5 @@
+{
+  "global": {
+    "cmd-alt-m": "claude-accounts.move-session"
+  }
+}

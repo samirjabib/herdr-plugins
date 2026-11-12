@@ -41,6 +41,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { moveArgs, moveStarted } from "../claude-accounts/mods/claude-accounts/move-model.js";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
 const SRC = join(repo, "claude-accounts/mods/claude-accounts");
@@ -1381,6 +1382,44 @@ test("resume and restart --cancel take a terminal's name: one terminal named two
   assert.deepEqual(s.json(["restart", "--cancel", "named"]), { cancelled: [first.job] });
   assert.equal(s.status(first.job).state, "cancelled");
   assert.ok(alive(t1.pid), "Claude wasn't stopped");
+});
+
+test("Move this session to… (S4): the dialog's command moves only that terminal; active and every other terminal stay; `use` still switches", async () => {
+  const s = sandbox({ active: A, switchMode: "keep" });
+  const t1 = s.term("t1", { on: A });
+  const t2 = s.term("t2", { on: A });
+  const t3 = s.term("t3", { on: B });
+  const before = s.active();
+  const target = { terminal: "t1", title: "claude · t1" };
+  const r = await s.exec(moveArgs("t1", B));
+  const started = moveStarted({ code: r.status, stdout: r.stdout, stderr: r.stderr }, { accounts: s.json(["list"]), target, id: B });
+  assert.equal(started.error, null, r.stderr);
+  assert.match(started.job, /^rs-[0-9a-f]{8}$/);
+  assert.equal((await s.final(started.job)).state, "done");
+  assert.equal(s.json(["terminal", "t1"]).account, B, "t1 moved");
+  assert.equal(s.active(), before, "the active account is unchanged");
+  assert.deepEqual(s.queue().map((i) => [i.kind, i.terminal]), [["resume", "t1"]], "one job, for t1 only");
+  assert.ok(alive(t2.pid) && alive(t3.pid), "t2 and t3 kept their Claude");
+  assert.deepEqual([s.sends("t2"), s.sends("t3")], [[], []], "nothing typed into t2 or t3");
+  assert.equal(s.json(["terminal", "t2"]).account, A);
+  assert.equal(s.json(["terminal", "t3"]).account, B);
+
+  // A terminal that isn't Claude, or has nothing to resume: the CLI's own words, and no job.
+  s.shell("t4");
+  s.term("t5", { on: A, transcript: false });
+  for (const [t, words] of [["t4", "Terminal t4 isn't running Claude."], ["t5", /^There's no conversation to resume yet in terminal t5/]]) {
+    const no = await s.exec(moveArgs(t, B));
+    const m = moveStarted({ code: no.status, stdout: no.stdout, stderr: no.stderr }, { accounts: null, target: { terminal: t, title: null }, id: B });
+    assert.equal(m.job, null);
+    if (typeof words === "string") assert.equal(m.error, words);
+    else assert.match(m.error, words);
+  }
+  assert.equal(s.queue().length, 1, "no job was queued for t4 or t5");
+
+  // `use` is as before: it switches the active account (Never restart leaves the terminals).
+  assert.equal(s.json(["use", B]).to, B);
+  assert.equal(s.active(), s.dirs[B]);
+  assert.deepEqual(s.sends("t2"), []);
 });
 
 test("the typed line: CLAUDE_ACCOUNTS_DIR and every kept arg survive a real shell exactly; injections and the first prompt are gone", async () => {
