@@ -7,7 +7,7 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { panes, props, run, theme, home, layout, exec, openOverlay } from "herdr";
-import { worktreeOf } from "./model.js";
+import { worktreeOf, withAlpha } from "./model.js";
 
 // Match the first visible tab frame, including the active child of a stack.
 function paneFrame(node) {
@@ -107,8 +107,8 @@ export default class Pane extends View {
       .child(div().flex_none().truncate().max_w(260).font_medium().text_color(t.foreground).child(name))
       .when(Boolean(wt), el => el.child(h_flex().flex_none().gap(4).items_center().max_w(320)
         .id(`ph-wt-${pane}`)
-        .px(6).h(18).rounded(5).bg(t.accent + "1f")
-        .hover((s) => s.bg(t.accent + "3d"))
+        .px(6).h(18).rounded(5).bg(withAlpha(t.accent, "1f"))
+        .hover((s) => s.bg(withAlpha(t.accent, "3d")))
         .tooltip(`${folder(p.cwd)} · click to switch worktree`)
         .on_click((_e, cx) => {
           // Quick switcher: every checkout of this repo with its branch; picking one
@@ -116,7 +116,7 @@ export default class Pane extends View {
           cx.stop_propagation();
           openOverlay({ mod: "worktree-ws", kind: "dialog", width: 560, height: 480, props: { folder: p.cwd, action: "open" } });
         })
-        .child(svg("mods/pane-branch/folder.svg").size(12).flex_none().text_color(t.accent))
+        .child(svg("mods/pane-branch/worktree.svg").size(12).flex_none().text_color(t.accent))
         .child(div().truncate().text_color(t.dim).child(wt?.project ?? ""))
         .child(div().text_color(t.dim).child("›"))
         .child(div().truncate().font_semibold().text_color(t.foreground).child(wt?.wt ?? ""))))
@@ -126,7 +126,7 @@ export default class Pane extends View {
       .when(!wt && Boolean(p.cwd), el => el.child(div().flex_none().max_w(280).truncate().text_color(t.dim).child(folder(p.cwd))))
       .child(div().flex_1())
       .when(st === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
-      .when(st === "blocked", el => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(5).bg(t.blocked + "26").text_size(10.5).font_semibold().text_color(t.blocked).child("Needs you")))
+      .when(st === "blocked", el => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(5).bg(withAlpha(t.blocked, "26")).text_size(10.5).font_semibold().text_color(t.blocked).child("Needs you")))
       .when(st === "done", el => el.child(div().size(7).flex_none().rounded(4).bg(t.done)))
       .when(this.hovered, el => el
         .child(this.button(t, `ph-r-${pane}`, "split-right", "pane.split", { direction: "right", pane }))

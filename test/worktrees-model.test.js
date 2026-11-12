@@ -3,7 +3,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { worktreeOf } from "../worktrees/mods/pane-branch/model.js";
-import { checkoutDir, repoTitle, slug, wsBase, cleanVerdict, mergedSet, size } from "../worktrees/mods/worktree-ws/model.js";
+import { checkoutDir, repoTitle, slug, wsBase, cleanVerdict, mergedSet, size, withAlpha } from "../worktrees/mods/worktree-ws/model.js";
+import { withAlpha as headerAlpha } from "../worktrees/mods/pane-branch/model.js";
 
 const H = "/Users/me";
 const ws = { main: `${H}/mac-workspace/ag/bh-dashboard/main`, name: "main" };
@@ -54,4 +55,13 @@ test("sizes read like people say them", () => {
   assert.equal(size(12 * 1024), "12 MB");
   assert.equal(size(1.4 * 1024 * 1024), "1.4 GB");
   assert.equal(size(0), "");
+});
+
+test("a tint replaces a theme color's alpha instead of appending to it", () => {
+  for (const f of [withAlpha, headerAlpha]) {
+    assert.equal(f("#ffffff18", "66"), "#ffffff66");
+    assert.equal(f("#3b82f6", "26"), "#3b82f626");
+    assert.equal(f("#fff", "1f"), "#ffffff1f");
+    assert.equal(f("red", "26"), "red");
+  }
 });

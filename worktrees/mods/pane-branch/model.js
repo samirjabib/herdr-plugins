@@ -11,3 +11,12 @@ export function worktreeOf(cwd) {
   if (hd) return { project: hd[1], wt: hd[2] };
   return null;
 }
+
+// A theme color with alpha `aa` (two hex digits), replacing any alpha it has:
+// theme colors can already be #rrggbbaa, and appending to those is invalid.
+export function withAlpha(color, aa) {
+  const m = /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.exec(color ?? "");
+  if (!m) return color;
+  const hex = m[1].length === 3 ? m[1].split("").map((ch) => ch + ch).join("") : m[1].slice(0, 6);
+  return `#${hex}${aa}`;
+}

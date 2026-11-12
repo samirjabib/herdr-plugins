@@ -4,7 +4,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
 import { run, props, closeOverlay, openOverlay, theme, spaces, panes, exec, home } from "herdr";
-import { ROOT, slug, checkoutDir, repoTitle, cleanVerdict, mergedSet, size } from "./model.js";
+import { ROOT, slug, checkoutDir, repoTitle, cleanVerdict, mergedSet, size, withAlpha } from "./model.js";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 function place(s, all = panes()) {
@@ -426,7 +426,7 @@ export default class Worktree extends View {
     const rows = this.list ?? [];
     const chosen = rows.filter((c) => c.safe && this.picked.has(c.path));
     const kb = chosen.reduce((sum, c) => sum + c.kb, 0);
-    const badge = (text, color) => div().flex_none().px(6).h(18).flex().items_center().rounded(5).bg(color + "26").text_size(10.5).font_semibold().text_color(color).child(text);
+    const badge = (text, color) => div().flex_none().px(6).h(18).flex().items_center().rounded(5).bg(withAlpha(color, "26")).text_size(10.5).font_semibold().text_color(color).child(text);
     const row = (c, i) => {
       const on = i === this.at;
       const picked = c.safe && this.picked.has(c.path);
@@ -446,7 +446,7 @@ export default class Worktree extends View {
           if (c.safe) picked ? this.picked.delete(c.path) : this.picked.add(c.path);
           cx.notify();
         })
-        .child(div().flex_none().size(14).rounded(4).border(1).border_color(c.safe ? (picked ? t.accent : t.border) : t.border + "66").when(picked, (el) => el.bg(t.accent)))
+        .child(div().flex_none().size(14).rounded(4).border(1).border_color(c.safe ? (picked ? t.accent : t.border) : withAlpha(t.border, "66")).when(picked, (el) => el.bg(t.accent)))
         .child(
           v_flex()
             .flex_1()
