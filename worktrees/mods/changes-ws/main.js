@@ -195,13 +195,13 @@ export default class Changes extends View {
     const wt = worktreeOf(cwd);
     if (!wt && !this.chipBranch) return div().flex_none();
     return h_flex().flex_none().h(30).px(12).gap(8).items_center().border_b(1).border_color(t.border).text_size(11.5)
-      .when(Boolean(wt), (el) => el.child(h_flex().id("panel-worktree").flex_shrink().min_w(0).gap(4).items_center().px(6).h(18).rounded(5)
+      .when(Boolean(wt), (el) => el.child(h_flex().id("panel-worktree").min_w(0).gap(4).items_center().px(6).h(18).rounded(5)
         .bg(withAlpha(t.accent, "1f")).tooltip(cwd ?? "")
         .child(svg("mods/changes-ws/worktree.svg").size(12).flex_none().text_color(t.accent))
         .child(div().truncate().text_color(t.dim).child(wt?.project ?? ""))
         .child(div().flex_none().text_color(t.dim).child("\u203a"))
         .child(div().truncate().font_semibold().text_color(t.foreground).child(wt?.wt ?? ""))))
-      .when(Boolean(this.chipBranch), (el) => el.child(h_flex().flex_shrink().min_w(0).gap(4).items_center().text_color(t.accent)
+      .when(Boolean(this.chipBranch), (el) => el.child(h_flex().min_w(0).gap(4).items_center().text_color(t.accent)
         .child(svg("mods/changes-ws/git-branch.svg").size(12).flex_none())
         .child(div().truncate().child(this.chipBranch))));
   }
