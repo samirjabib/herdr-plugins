@@ -56,6 +56,25 @@ test("S1: only a Max or Pro subscription is eligible; Enterprise, Team, no plan 
   assert.equal(isAutoSwitchEligible(acct("a", "Max 5x", 0, 0), { excluded: ["b"] }), true);
 });
 
+test("S2: an account nobody runs (expired token, old numbers) is still a target: its last numbers count, a window past its reset counts as empty", () => {
+  const stale = { error: "expired", usageUpdatedAt: NOW - 12 * HOUR };
+  const resetPast = (id, pct) => acct(id, "Max 5x", null, null, { ...stale, usage: { session: { percent: pct, resetsAt: NOW - HOUR }, weekly: w(10, NOW + 3 * 24 * HOUR), fable: null, monthly: null } });
+  // The other Max was last read 12 h ago at 3% weekly: it is chosen.
+  let d = pickAutoSwitch(docOf("m1", acct("m1", "Max 5x", 97, 40), acct("m2", "Max 5x", 0, 3, stale)), { now: NOW });
+  assert.deepEqual([d.action, d.to], ["switch", "m2"]);
+  // Its 5h window was at 99% but has reset since: it counts as empty.
+  d = pickAutoSwitch(docOf("m1", acct("m1", "Max 5x", 97, 40), resetPast("m2", 99)), { now: NOW });
+  assert.deepEqual([d.action, d.to], ["switch", "m2"]);
+  // Fresh numbers win a tie on room over old ones.
+  d = pickAutoSwitch(docOf("m1", acct("m1", "Max 5x", 97, 40), acct("old", "Max 5x", 0, 10, stale), acct("new", "Max 5x", 0, 10)), { now: NOW });
+  assert.equal(d.to, "new");
+  // Not signed in as itself: never a target, and Enterprise stays out however old its numbers.
+  for (const extra of [{ needsSignIn: true }, { needsSignIn: true, signedInAs: "x@example.com" }]) {
+    d = pickAutoSwitch(docOf("m1", acct("m1", "Max 5x", 97, 40), acct("m2", "Max 5x", 0, 0, { ...stale, ...extra }), acct("ent", "Enterprise", 0, 0, stale)), { now: NOW });
+    assert.equal(d.action, "stay", JSON.stringify(extra));
+  }
+});
+
 test("S1: Enterprise is never chosen, even when it is the only account with room: the switch stays and says why", () => {
   const doc = docOf("max1", acct("max1", "Max 5x", 96, 40), acct("max2", "Max 20x", 99, 50), acct("ent", "Enterprise", 0, 0), acct("team", "Team", 1, 1));
   const d = pickAutoSwitch(doc, { now: NOW });
@@ -81,16 +100,17 @@ test("S2: at the line on 5h or weekly it picks the eligible account with the mos
   assert.equal(pickAutoSwitch(docOf("m1", acct("m1", "Max 5x", 94, 94), acct("m3", "Max", 0, 0)), { now: NOW }).action, "none");
 });
 
-test("S2: fresh data only: a stale, failed or signed-out candidate is skipped, and a stale active account never moves", () => {
+test("S2: a signed-out or full candidate is skipped, old or failed numbers still count, and a stale active account never moves", () => {
   const candidates = [
-    acct("old", "Max", 0, 0, { usageUpdatedAt: NOW - 31 * MIN }),
-    acct("never", "Max", null, null, { usageUpdatedAt: null }),
-    acct("err", "Max", 0, 0, { error: "network" }),
     acct("out", "Max", 0, 0, { needsSignIn: true }),
     acct("full", "Max", 10, 97),
   ];
   const stuck = pickAutoSwitch(docOf("m1", acct("m1", "Max", 100, 10), ...candidates), { now: NOW });
   assert.equal(stuck.action, "stay");
+  for (const extra of [{ usageUpdatedAt: NOW - 31 * MIN }, { error: "network" }, { usageUpdatedAt: null }]) {
+    const d = pickAutoSwitch(docOf("m1", acct("m1", "Max", 100, 10), ...candidates, acct("aged", "Max", 20, 20, extra)), { now: NOW });
+    assert.equal(d.to, "aged", JSON.stringify(extra));
+  }
   const ok = pickAutoSwitch(docOf("m1", acct("m1", "Max", 100, 10), ...candidates, acct("good", "Max", 80, 80)), { now: NOW });
   assert.equal(ok.to, "good");
   for (const patch of [{ usageUpdatedAt: NOW - 31 * MIN }, { error: "rateLimited" }, { needsSignIn: true }]) {

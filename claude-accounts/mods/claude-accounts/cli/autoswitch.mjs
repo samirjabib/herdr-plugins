@@ -59,6 +59,19 @@ function isFresh(a, now) {
     now - a.usageUpdatedAt <= FRESH_MS && a.usageUpdatedAt <= now + FUTURE_SKEW_MS;
 }
 
+// Its own login is in its folder (it may still need Claude to refresh it).
+const isSignedIn = (a) => Boolean(a) && a.needsSignIn !== true && !a.signedInAs;
+
+// Its usage with every window past its reset read as empty.
+function withoutPastWindows(a, now) {
+  const usage = { ...(a.usage ?? {}) };
+  for (const key of WINDOWS) {
+    const win = usage[key];
+    if (win && isNumber(win.resetsAt) && win.resetsAt <= now) usage[key] = { percent: 0, resetsAt: null };
+  }
+  return { ...a, usage };
+}
+
 // The most used of its 5-hour and weekly windows: { window, percent, resetsAt }.
 function tightest(a) {
   let best = { window: "session", percent: 0, resetsAt: null };
@@ -90,12 +103,17 @@ export function pickAutoSwitch(doc, { now = Date.now(), line = SWITCH_LINE, excl
   if (!isFresh(active, now)) return { action: "none", reason: "stale" };
   const full = tightest(active);
   if (full.percent < line) return { action: "none", reason: "underLine" };
+  // A target only needs its own login. Nobody runs Claude on the other
+  // accounts, so their tokens lapse and their numbers age: the last ones
+  // count, a window past its reset counts as empty, and fresh numbers win a
+  // tie on room.
   let best = null;
   for (const a of accounts) {
     if (a.id === active.id || a.isDefault || sameLogin(a, active)) continue;
-    if (!isAutoSwitchEligible(a, { excluded }) || !isFresh(a, now)) continue;
-    const room = line - tightest(a).percent;
-    if (room > 0 && (!best || room > best.room)) best = { id: a.id, room };
+    if (!isAutoSwitchEligible(a, { excluded }) || !isSignedIn(a)) continue;
+    const room = line - tightest(withoutPastWindows(a, now)).percent;
+    const fresh = isFresh(a, now);
+    if (room > 0 && (!best || room > best.room || (room === best.room && fresh && !best.fresh))) best = { id: a.id, room, fresh };
   }
   const at = { from: active.id, window: full.window, percent: full.percent, resetsAt: full.resetsAt };
   return best ? { action: "switch", ...at, to: best.id } : { action: "stay", ...at };

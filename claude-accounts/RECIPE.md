@@ -166,9 +166,11 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
     window is at 95% or more, it switches to the eligible account with the
     most room left (95 minus its most used of the two), through `use`'s own
     path, so the switch setting applies to running terminals as for a click.
-  - Eligible: a saved account on a Max or Pro plan, with numbers read in
-    the last 30 minutes, no error, no sign-in needed, and both windows under
-    95%. Never Enterprise or Team (billed per use), never System default or
+  - Eligible: a saved account on a Max or Pro plan, signed in as itself, and
+    both windows under 95%. Nobody runs Claude on the other accounts, so their
+    tokens lapse and their numbers age: their last numbers count, a window past
+    its reset counts as empty, and fresh numbers win a tie on room. Never
+    Enterprise or Team (billed per use), never System default or
     an account of the same login, never one excluded with `claude-accounts
     auto-switch exclude <id>` (`include <id>` takes it back; no row for it
     in Manage Accounts).
