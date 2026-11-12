@@ -1,0 +1,52 @@
+// The worktrees plugin's pure rules: where checkouts go, how the header names
+// them, and which ones clean up may remove.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { worktreeOf } from "../worktrees/mods/pane-branch/model.js";
+import { checkoutDir, repoTitle, slug, wsBase, cleanVerdict, mergedSet, size } from "../worktrees/mods/worktree-ws/model.js";
+
+const H = "/Users/me";
+const ws = { main: `${H}/mac-workspace/ag/bh-dashboard/main`, name: "main" };
+const other = { main: `${H}/code/app`, name: "app" };
+
+test("the header names a mac-workspace checkout by project and worktree", () => {
+  assert.deepEqual(worktreeOf(`${H}/mac-workspace/ag/bh-dashboard/main`), { project: "bh-dashboard", wt: "main" });
+  assert.deepEqual(worktreeOf(`${H}/mac-workspace/ag/bh-dashboard/worktrees/fix-nav/src/app`), { project: "bh-dashboard", wt: "fix-nav" });
+  assert.deepEqual(worktreeOf(`${H}/.herdr/worktrees/main/lids-marks`), { project: "main", wt: "lids-marks" });
+  assert.equal(worktreeOf(H), null);
+  assert.equal(worktreeOf(null), null);
+});
+
+test("new checkouts go beside main in the mac-workspace layout, else under Herdr's root", () => {
+  assert.equal(wsBase(ws.main), `${H}/mac-workspace/ag/bh-dashboard`);
+  assert.equal(checkoutDir(ws, H), `${H}/mac-workspace/ag/bh-dashboard/worktrees`);
+  assert.equal(checkoutDir(other, H), `${H}/.herdr/worktrees/app`);
+  assert.equal(slug("feat/lids plugin"), "feat-lids-plugin");
+});
+
+test("a repo is titled by its project folder, not its 'main' checkout folder", () => {
+  assert.equal(repoTitle(ws), "bh-dashboard");
+  assert.equal(repoTitle(other), "app");
+});
+
+test("clean up removes only merged, clean, pushed checkouts no pane is in", () => {
+  const ok = { main: false, branch: "fix-nav", merged: true, dirty: false, unpushed: 0, open: false };
+  assert.deepEqual(cleanVerdict(ok), { safe: true, why: [] });
+  assert.deepEqual(cleanVerdict({ ...ok, merged: false }).why, ["not merged"]);
+  assert.deepEqual(cleanVerdict({ ...ok, dirty: true }).why, ["uncommitted changes"]);
+  assert.deepEqual(cleanVerdict({ ...ok, unpushed: 2 }).why, ["2 unpushed"]);
+  assert.deepEqual(cleanVerdict({ ...ok, open: true }).why, ["open in a pane"]);
+  assert.equal(cleanVerdict({ ...ok, main: true }).safe, false);
+  assert.equal(cleanVerdict({ ...ok, branch: null }).safe, false);
+});
+
+test("merged branches come from PRs and from git, blank lines ignored", () => {
+  assert.deepEqual([...mergedSet("a\nb\n", "\nb\nc", undefined)].sort(), ["a", "b", "c"]);
+});
+
+test("sizes read like people say them", () => {
+  assert.equal(size(840), "840 KB");
+  assert.equal(size(12 * 1024), "12 MB");
+  assert.equal(size(1.4 * 1024 * 1024), "1.4 GB");
+  assert.equal(size(0), "");
+});
