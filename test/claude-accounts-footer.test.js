@@ -1271,13 +1271,17 @@ test("accounts view (S8): the row draws its saved email, its org and date, then 
   await flush();
   const row = find(view.render(), `ca-accounts-row-${BEN}`);
   const text = textOf(row);
-  assert.ok(text.startsWith("ben@example.org This device Acme · "), text);
+  assert.ok(text.startsWith("ben@example.org This device Signed in as dee@example.com Acme · "), text);
   assert.ok(text.includes("Now signed in as dee@example.com"), text);
-  assert.ok(text.includes("Sign in again"), text);
-  assert.doesNotMatch(text, /Sign in again to use this account/);
+  assert.ok(text.includes("Sign in Remove"), text);
+  assert.doesNotMatch(text, /Sign in again/);
   assert.equal(find(row, `ca-accounts-pick-${BEN}`).handlers.click, undefined, "it can't be picked");
-  // An account with its own login draws no such line.
-  assert.doesNotMatch(textOf(find(view.render(), `ca-accounts-row-${ANA}`)), /Now signed in as/);
+  // An account with its own login draws no such line, says it's signed in
+  // and offers no Sign in button (S6).
+  const own = textOf(find(view.render(), `ca-accounts-row-${ANA}`));
+  assert.doesNotMatch(own, /Now signed in as/);
+  assert.match(own, /Signed in/);
+  assert.doesNotMatch(own, /Sign in Remove/);
 });
 
 test("panel view: opening it asks for the usage that's due", async () => {

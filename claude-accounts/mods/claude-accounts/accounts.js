@@ -351,10 +351,10 @@ export default class Accounts {
   accountRow(t, m, row) {
     return this.card(t, `ca-accounts-row-${row.id}`, row.active)
       .when(row.canSelect && !this.busy, (el) => el.hover((s) => s.bg(t.hover)))
-      .child(this.pick(t, row.id, row.canSelect, row.email, row.badges, row.subtitle, row.hint))
+      .child(this.pick(t, row.id, row.canSelect, row.email, [...row.badges, row.status], row.subtitle, row.hint))
       .child(h_flex().flex_none().gap(4).items_center()
-        .child(this.splitButton(t, `signin:${row.id}`, m.signInAgain, m.copyLink, "ghost", !this.busy,
-          (cx) => this.signIn(cx, row.id, false), (cx) => this.signIn(cx, row.id, true)))
+        .when(Boolean(row.signIn), (el) => el.child(this.splitButton(t, `signin:${row.id}`, row.signIn, m.copyLink, "ghost", !this.busy,
+          (cx) => this.signIn(cx, row.id, false), (cx) => this.signIn(cx, row.id, true))))
         .child(this.button(t, `ca-accounts-remove-${row.id}`, this.busy === `remove:${row.id}` ? "Removing…" : m.remove, "ghost", !this.busy, (cx) => {
           this.removing = row.id;
           this.menu = null;

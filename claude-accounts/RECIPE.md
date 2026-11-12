@@ -58,8 +58,12 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
     "API · pay per use" for an Enterprise or Team plan, "This device",
     `org · date` of its last
     sign-in ("Now signed in as {login}" under it when its folder got someone
-    else's login), `Sign in again ▾` (its menu: "Copy sign-in link instead")
-    and `Remove`. Then `Add account ▾`, with the same menu.
+    else's login), its sign-in status as the last tag ("Signed in", "Signed
+    out", or "Signed in as {login}" when its folder got someone else's login;
+    an expired token Claude refreshes on its own still reads "Signed in"),
+    `Sign in ▾` only when it isn't signed in as itself (its menu: "Copy
+    sign-in link instead") and `Remove`. Then `Add account ▾`, with the same
+    menu.
   - Only while System default is the active account: "System default:
     {email}" / "Use your current {email} Claude login.", and Orca's notice
     when it is signed in as an email that is also a saved account.

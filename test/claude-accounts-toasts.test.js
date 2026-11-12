@@ -476,8 +476,8 @@ test("accounts: one row per saved account: email, This device, org · date, Acti
   assert.equal(m.duplicate, null);
   assert.equal(m.intro, null);
   assert.deepEqual(m.rows, [
-    { id: ANA, email: "ana@example.com", badges: ["This device", "Active"], subtitle: "Example Org · Oct 29, 1:53 PM", hint: null, active: true, needsSignIn: false, canSelect: false },
-    { id: BEN, email: "ben@example.org", badges: ["This device"], subtitle: "Acme · Nov 2, 5:25 PM", hint: null, active: false, needsSignIn: false, canSelect: true },
+    { id: ANA, email: "ana@example.com", badges: ["This device", "Active"], subtitle: "Example Org · Oct 29, 1:53 PM", hint: null, status: "Signed in", signIn: null, active: true, needsSignIn: false, canSelect: false },
+    { id: BEN, email: "ben@example.org", badges: ["This device"], subtitle: "Acme · Nov 2, 5:25 PM", hint: null, status: "Signed in", signIn: null, active: false, needsSignIn: false, canSelect: true },
   ]);
   assert.equal(m.empty, null);
 });
@@ -553,8 +553,23 @@ test("accounts: a row that needs sign-in says Orca's line and can't be picked; S
   assert.equal(m.systemDefault.canSelect, false);
   assert.equal(m.systemDefault.canSignIn, true, "no login at all: Sign in again");
   assert.equal(m.duplicate, null);
-  assert.deepEqual(m.rows[1], { id: BEN, email: "ben@example.org", badges: ["This device"], subtitle: "Sign in again to use this account", hint: null, active: false, needsSignIn: true, canSelect: false });
+  assert.deepEqual(m.rows[1], { id: BEN, email: "ben@example.org", badges: ["This device"], subtitle: "Sign in again to use this account", hint: null, status: "Signed out", signIn: "Sign in", active: false, needsSignIn: true, canSelect: false });
   assert.equal(m.rows[0].subtitle, "Example Org · Oct 29, 1:53 PM");
+});
+
+test("accounts (S6): each row says whether it is signed in; only a signed-out one offers Sign in", () => {
+  const doc = accounts();
+  doc.accounts[2] = { ...doc.accounts[2], needsSignIn: true };
+  doc.accounts[1] = { ...doc.accounts[1], needsSignIn: false, error: "expired" };
+  const m = accountsModel({ accounts: doc });
+  assert.equal(m.rows[0].status, "Signed in", "an expired token Claude refreshes on its own is still signed in");
+  assert.equal(m.rows[0].signIn, null, "no button while it's signed in");
+  assert.equal(m.rows[1].status, "Signed out");
+  assert.equal(m.rows[1].signIn, "Sign in");
+  doc.accounts[2] = { ...doc.accounts[2], needsSignIn: true, signedInAs: "dee@example.com" };
+  const other = accountsModel({ accounts: doc }).rows[1];
+  assert.equal(other.status, "Signed in as dee@example.com", "someone else's login is not this account's");
+  assert.equal(other.signIn, "Sign in");
 });
 
 test("accounts (S8): a folder signed in as someone else keeps its saved email, and says so under its org and date; it can't be picked", () => {
@@ -567,6 +582,8 @@ test("accounts (S8): a folder signed in as someone else keeps its saved email, a
     badges: ["This device"],
     subtitle: "Acme · Nov 2, 5:25 PM",
     hint: "Now signed in as dee@example.com",
+    status: "Signed in as dee@example.com",
+    signIn: "Sign in",
     active: false,
     needsSignIn: true,
     canSelect: false,

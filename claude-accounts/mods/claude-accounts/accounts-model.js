@@ -143,6 +143,11 @@ export function accountsModel({ accounts, settings, dismissed = null, signingIn 
         badges: [str(a.plan), isPayPerUse(a) ? PAY_PER_USE_TAG : null, THIS_DEVICE, isActive ? "Active" : null].filter(Boolean),
         subtitle: needsSignIn && !signedInAs ? "Sign in again to use this account" : [str(a.org), date].filter(Boolean).join(" · "),
         hint: signedInAs ? `Now signed in as ${signedInAs}` : null,
+        // S6: whether this account's own login is there, said on the row; the
+        // Sign in button shows only when it isn't (an expired token Claude
+        // refreshes on its own still counts as signed in).
+        status: !needsSignIn ? "Signed in" : signedInAs ? `Signed in as ${signedInAs}` : "Signed out",
+        signIn: needsSignIn ? "Sign in" : null,
         active: isActive,
         needsSignIn,
         // Orca disables picking an account that needs sign-in (the CLI's
