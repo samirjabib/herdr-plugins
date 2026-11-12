@@ -34,8 +34,8 @@ that are done.
   branch and commits, so one can go when nothing is uncommitted, every commit
   is on a remote and no pane is in it. Merged ones are chosen by default;
   pushed but unmerged ones can be chosen by hand; the rest are greyed out with
-  what would be lost ("uncommitted changes", "2 only on this Mac", "open in a
-  pane"). Click or `space` toggles one; the "Remove N · size" button removes
+  what would be lost ("uncommitted changes", "2 only on this Mac"), or who is
+  using it ("in use · Claude working", "in use · shell", in the working color). Click or `space` toggles one; the "Remove N · size" button removes
   the chosen ones with `git worktree remove` (never forced) and shows the
   space freed.
 - **Buttons.** The switcher has "+ New worktree" and "Clean up…"; the create,

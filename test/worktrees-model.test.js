@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { worktreeOf } from "../worktrees/mods/pane-branch/model.js";
-import { checkoutDir, repoTitle, slug, wsBase, cleanVerdict, mergedSet, size, withAlpha } from "../worktrees/mods/worktree-ws/model.js";
+import { checkoutDir, repoTitle, slug, wsBase, cleanVerdict, mergedSet, size, withAlpha, usedBy } from "../worktrees/mods/worktree-ws/model.js";
 import { withAlpha as headerAlpha } from "../worktrees/mods/pane-branch/model.js";
 
 const H = "/Users/me";
@@ -36,7 +36,8 @@ test("clean up removes a checkout only when nothing in it can be lost", () => {
   assert.deepEqual(cleanVerdict({ ...ok, dirty: true }).why, ["uncommitted changes"]);
   assert.deepEqual(cleanVerdict({ ...ok, unpushed: 2 }).why, ["2 only on this Mac"]);
   assert.equal(cleanVerdict({ ...ok, unpushed: 2 }).onRemote, false);
-  assert.deepEqual(cleanVerdict({ ...ok, open: true }).why, ["open in a pane"]);
+  assert.deepEqual(cleanVerdict({ ...ok, open: true }).why, ["in use"]);
+  assert.deepEqual(cleanVerdict({ ...ok, open: "in use · Claude working" }).why, ["in use · Claude working"]);
   assert.equal(cleanVerdict({ ...ok, main: true }).safe, false);
   assert.equal(cleanVerdict({ ...ok, branch: null }).safe, false);
 });
@@ -64,4 +65,14 @@ test("a tint replaces a theme color's alpha instead of appending to it", () => {
     assert.equal(f("#fff", "1f"), "#ffffff1f");
     assert.equal(f("red", "26"), "red");
   }
+});
+
+test("a checkout in use says who: the agent and its status, else shells", () => {
+  const wt = "/r/worktrees/a";
+  assert.equal(usedBy(wt, []), false);
+  assert.equal(usedBy(wt, [{ cwd: "/r/worktrees/ab", app: "claude-code", status: "working" }]), false);
+  assert.equal(usedBy(wt, [{ cwd: `${wt}/src`, app: "claude-code", status: "working" }]), "in use · Claude working");
+  assert.equal(usedBy(wt, [{ cwd: wt, app: null, status: null }]), "in use · shell");
+  assert.equal(usedBy(wt, [{ cwd: wt, app: null }, { cwd: wt, app: null }]), "in use · 2 shells");
+  assert.equal(usedBy(wt, [{ cwd: wt, app: "pi", status: null }]), "in use · Pi");
 });

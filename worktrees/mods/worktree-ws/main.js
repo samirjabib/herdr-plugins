@@ -4,7 +4,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
 import { run, props, closeOverlay, openOverlay, theme, spaces, panes, exec, home } from "herdr";
-import { ROOT, slug, checkoutDir, repoTitle, cleanVerdict, mergedSet, size, withAlpha } from "./model.js";
+import { ROOT, slug, checkoutDir, repoTitle, cleanVerdict, mergedSet, size, withAlpha, usedBy } from "./model.js";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 function place(s, all = panes()) {
@@ -284,7 +284,7 @@ export default class Worktree extends View {
         merged: Boolean(c.branch && merged.has(c.branch)),
         dirty: !st.ok || st.out !== "",
         unpushed: ahead.ok ? Number(ahead.out) || 0 : 1,
-        open: paneList.some((q) => q.cwd && (q.cwd === c.path || q.cwd.startsWith(c.path + "/"))),
+        open: usedBy(c.path, paneList),
         kb: du && du.code === 0 ? Number(du.stdout.split(/\s/)[0]) || 0 : 0,
       };
       return { ...row, ...cleanVerdict(row) };
@@ -455,7 +455,7 @@ export default class Worktree extends View {
               .child(div().flex_1().min_w(0).truncate().text_color(c.safe ? t.foreground : t.muted).child(c.branch ?? "detached"))
               .when(c.inMain, (el) => el.child(badge("in main", t.done)))
               .when(c.onRemote, (el) => el.child(badge("on remote", t.done)))
-              .children(c.why.map((w) => badge(w, t.blocked))))
+              .children(c.why.map((w) => badge(w, w.startsWith("in use") ? t.working : t.blocked))))
             .child(div().truncate().text_size(11.5).text_color(t.dim).child(tilde(c.path, this.userHome ?? ""))),
         )
         .child(div().flex_none().w(64).text_size(11.5).text_color(t.dim).child(size(c.kb)))

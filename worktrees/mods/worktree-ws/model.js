@@ -24,6 +24,7 @@ export const repoTitle = (repo) => wsBase(repo.main)?.split("/").pop() ?? repo.n
 // on a branch, nothing is uncommitted, every commit is on a remote (pushing or
 // merging puts it there) and no pane is in it. Suggested (chosen by default)
 // when its branch is also merged into a base, so the work is in main.
+// open: false, true, or the label of who uses it ("in use · Claude working").
 // { main, branch, merged, dirty, unpushed, open } ->
 //   { safe, suggested, inMain, onRemote, why: [] }
 export function cleanVerdict(c) {
@@ -32,7 +33,7 @@ export function cleanVerdict(c) {
   if (!c.branch) why.push("detached");
   if (c.dirty) why.push("uncommitted changes");
   if (c.unpushed > 0) why.push(`${c.unpushed} only on this Mac`);
-  if (c.open) why.push("open in a pane");
+  if (c.open) why.push(typeof c.open === "string" ? c.open : "in use");
   const safe = why.length === 0;
   return { safe, suggested: safe && Boolean(c.merged), inMain: Boolean(c.merged), onRemote: c.unpushed === 0, why };
 }
@@ -43,6 +44,19 @@ export function mergedSet(...outputs) {
   const set = new Set();
   for (const out of outputs) for (const line of (out ?? "").split("\n")) if (line.trim()) set.add(line.trim());
   return set;
+}
+
+// Who is in a checkout, for its "in use" badge: the panes whose live folder
+// is inside it. An agent's name and status when one runs there, else a shell.
+// panes: [{ cwd, app, status }] -> false | "in use · Claude working" | "in use · shell"
+const AGENTS = { "claude-code": "Claude", pi: "Pi", codex: "Codex", opencode: "OpenCode" };
+export function usedBy(path, panes) {
+  const here = panes.filter((q) => q.cwd && (q.cwd === path || q.cwd.startsWith(path + "/")));
+  if (here.length === 0) return false;
+  const agent = here.find((q) => q.app);
+  if (!agent) return here.length > 1 ? `in use · ${here.length} shells` : "in use · shell";
+  const name = AGENTS[agent.app] ?? agent.app;
+  return `in use · ${name}${agent.status ? ` ${agent.status}` : ""}`;
 }
 
 // du -sk kilobytes for people: 840 KB, 12 MB, 1.4 GB.
