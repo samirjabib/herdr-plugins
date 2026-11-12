@@ -17,19 +17,24 @@ export const checkoutDir = (repo, userHome) => wsBase(repo.main) ? `${wsBase(rep
 // (its main checkout's folder is always "main"), else the main checkout's folder.
 export const repoTitle = (repo) => wsBase(repo.main)?.split("/").pop() ?? repo.name;
 
-// Clean up: whether a checkout can go, and why not. Only a linked checkout
-// whose branch is merged, with nothing uncommitted, no commit missing from
-// every remote and no pane inside it, is safe: removing it loses nothing.
-// { main, branch, merged, dirty, unpushed, open } -> { safe, why: [] }
+// Clean up: whether a checkout can go without losing anything, and why not.
+// Removing a worktree keeps its branch and commits; what it can lose is
+// uncommitted work, and commits that exist only on this machine (should the
+// branch be deleted later). So a checkout is removable when it is a linked one
+// on a branch, nothing is uncommitted, every commit is on a remote (pushing or
+// merging puts it there) and no pane is in it. Suggested (chosen by default)
+// when its branch is also merged into a base, so the work is in main.
+// { main, branch, merged, dirty, unpushed, open } ->
+//   { safe, suggested, inMain, onRemote, why: [] }
 export function cleanVerdict(c) {
   const why = [];
   if (c.main) why.push("main checkout");
   if (!c.branch) why.push("detached");
   if (c.dirty) why.push("uncommitted changes");
-  if (c.unpushed > 0) why.push(`${c.unpushed} unpushed`);
+  if (c.unpushed > 0) why.push(`${c.unpushed} only on this Mac`);
   if (c.open) why.push("open in a pane");
-  if (!c.merged) why.push("not merged");
-  return { safe: why.length === 0, why };
+  const safe = why.length === 0;
+  return { safe, suggested: safe && Boolean(c.merged), inMain: Boolean(c.merged), onRemote: c.unpushed === 0, why };
 }
 
 // Branch names out of `gh pr list --json headRefName --jq '.[].headRefName'`

@@ -29,15 +29,20 @@ test("a repo is titled by its project folder, not its 'main' checkout folder", (
   assert.equal(repoTitle(other), "app");
 });
 
-test("clean up removes only merged, clean, pushed checkouts no pane is in", () => {
+test("clean up removes a checkout only when nothing in it can be lost", () => {
   const ok = { main: false, branch: "fix-nav", merged: true, dirty: false, unpushed: 0, open: false };
-  assert.deepEqual(cleanVerdict(ok), { safe: true, why: [] });
-  assert.deepEqual(cleanVerdict({ ...ok, merged: false }).why, ["not merged"]);
+  assert.deepEqual(cleanVerdict(ok), { safe: true, suggested: true, inMain: true, onRemote: true, why: [] });
   assert.deepEqual(cleanVerdict({ ...ok, dirty: true }).why, ["uncommitted changes"]);
-  assert.deepEqual(cleanVerdict({ ...ok, unpushed: 2 }).why, ["2 unpushed"]);
+  assert.deepEqual(cleanVerdict({ ...ok, unpushed: 2 }).why, ["2 only on this Mac"]);
+  assert.equal(cleanVerdict({ ...ok, unpushed: 2 }).onRemote, false);
   assert.deepEqual(cleanVerdict({ ...ok, open: true }).why, ["open in a pane"]);
   assert.equal(cleanVerdict({ ...ok, main: true }).safe, false);
   assert.equal(cleanVerdict({ ...ok, branch: null }).safe, false);
+});
+
+test("a pushed branch not merged yet can go but isn't suggested", () => {
+  const pushed = { main: false, branch: "wip", merged: false, dirty: false, unpushed: 0, open: false };
+  assert.deepEqual(cleanVerdict(pushed), { safe: true, suggested: false, inMain: false, onRemote: true, why: [] });
 });
 
 test("merged branches come from PRs and from git, blank lines ignored", () => {

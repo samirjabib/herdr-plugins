@@ -24,6 +24,24 @@ const ago = (s) => {
   return d < 3600 ? `${Math.max(1, Math.round(d / 60))}m` : d < 86400 ? `${Math.round(d / 3600)}h` : d < 86400 * 60 ? `${Math.round(d / 86400)}d` : `${Math.round(d / 86400 / 30)}mo`;
 };
 
+// A dialog button; `primary` is the solid one, `disabled` greys it out.
+const button = (t, id, label, onClick, { primary = false, disabled = false } = {}) =>
+  h_flex()
+    .id(id)
+    .flex_none()
+    .h(28)
+    .px(12)
+    .items_center()
+    .rounded(7)
+    .border_1()
+    .text_size(12)
+    .border_color(primary ? t.solid : t.input)
+    .bg(primary ? t.solid : t.raised)
+    .text_color(primary ? t.solid_foreground : t.foreground)
+    .when(disabled, (el) => el.opacity(0.45))
+    .when(!disabled, (el) => el.cursor_pointer().hover((s) => s.opacity(0.88)).on_click((_e, cx) => { cx.stop_propagation(); onClick(cx); }))
+    .child(label);
+
 // Every checkout of a repo (`git worktree list`), the main one first, then
 // the most recently committed: { path, branch, main, at }.
 async function checkouts(repo, on) {
@@ -271,9 +289,10 @@ export default class Worktree extends View {
       };
       return { ...row, ...cleanVerdict(row) };
     }));
-    // Safe ones first and chosen by default; then the rest, biggest first.
-    rows.sort((a, b) => b.safe - a.safe || b.kb - a.kb);
-    this.picked = new Set(rows.filter((r) => r.safe).map((r) => r.path));
+    // Merged ones first and chosen by default, then the other removable ones,
+    // then those that would lose something; biggest first in each.
+    rows.sort((a, b) => b.suggested - a.suggested || b.safe - a.safe || b.kb - a.kb);
+    this.picked = new Set(rows.filter((r) => r.suggested).map((r) => r.path));
     return rows;
   }
 
@@ -297,6 +316,12 @@ export default class Worktree extends View {
     cx.notify();
   }
 
+  // Swap this dialog for another mode of it on the same repo.
+  switchTo(action, width, height) {
+    this.close();
+    openOverlay({ mod: "worktree-ws", kind: "dialog", width, height, props: { space: props()?.space, folder: this.folder, action } });
+  }
+
   key(e, cx) {
     if (e.key === "escape") return this.close();
     if (this.cleaning) {
@@ -313,9 +338,7 @@ export default class Worktree extends View {
     }
     if (this.opening && e.keystroke === "ctrl-d") {
       cx.stop_propagation();
-      this.close();
-      openOverlay({ mod: "worktree-ws", kind: "dialog", width: 620, height: 520, props: { folder: this.folder, action: "clean" } });
-      return;
+      return this.switchTo("clean", 640, 540);
     }
     if (this.opening) {
       const n = this.shown().length;
@@ -391,7 +414,11 @@ export default class Worktree extends View {
               .child(Scrollbar.vertical("wt-list").absolute().inset_0()),
           ),
       )
-      .child(h_flex().justify_end().text_size(11).text_color(t.dim).child("\u2191\u2193 choose \u00b7 \u21b5 open \u00b7 \u2303d clean up \u00b7 esc close"));
+      .child(h_flex().gap(8).items_center()
+        .child(button(t, "wt-new", "+ New worktree", () => this.switchTo("new", 440, 260), { disabled: !r }))
+        .child(button(t, "wt-clean", "Clean up\u2026", () => this.switchTo("clean", 640, 540), { disabled: !r }))
+        .child(div().flex_1())
+        .child(div().text_size(11).text_color(t.dim).child("\u2191\u2193 choose \u00b7 \u21b5 open \u00b7 \u2303d clean up \u00b7 esc close")));
   }
 
   renderClean(t) {
@@ -426,8 +453,9 @@ export default class Worktree extends View {
             .min_w(0)
             .child(h_flex().gap(6).items_center()
               .child(div().flex_1().min_w(0).truncate().text_color(c.safe ? t.foreground : t.muted).child(c.branch ?? "detached"))
-              .when(c.merged, (el) => el.child(badge("merged", t.done)))
-              .children(c.why.filter((w) => w !== "not merged").map((w) => badge(w, t.blocked))))
+              .when(c.inMain, (el) => el.child(badge("in main", t.done)))
+              .when(c.onRemote, (el) => el.child(badge("on remote", t.done)))
+              .children(c.why.map((w) => badge(w, t.blocked))))
             .child(div().truncate().text_size(11.5).text_color(t.dim).child(tilde(c.path, this.userHome ?? ""))),
         )
         .child(div().flex_none().w(64).text_size(11.5).text_color(t.dim).child(size(c.kb)))
@@ -444,7 +472,7 @@ export default class Worktree extends View {
       .text_size(13)
       .child(h_flex().child(div().flex_1().font_semibold().text_color(t.foreground).child(`Clean up worktrees${r ? ` of ${repoTitle(r)}` : ""}`))
         .child(div().text_size(11).text_color(t.dim).child(this.freed > 0 ? `${size(this.freed)} freed` : r ? `${rows.length} worktrees` : "")))
-      .child(div().text_size(12).text_color(t.muted).child("Merged, clean and pushed worktrees can go; their branches stay. The rest show why not."))
+      .child(div().text_size(12).text_color(t.muted).child("Removing a worktree keeps its branch. One can go when nothing is uncommitted and every commit is on a remote; merged ones are chosen. The rest say what would be lost."))
       .when(r === undefined || (r && this.list === undefined), (el) => el.child(div().text_color(t.muted).child("Reading worktrees\u2026")))
       .when(Boolean(r && this.list), (el) =>
         el.child(
@@ -455,9 +483,12 @@ export default class Worktree extends View {
         ),
       )
       .when(Boolean(this.error), (el) => el.child(div().text_size(12).text_color(t.blocked).child(this.error)))
-      .child(h_flex().justify_end().gap(6).text_size(11).text_color(t.dim)
-        .when(this.busy, (el) => el.child(div().frames(["\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"], 90)))
-        .child(this.busy ? "removing\u2026" : chosen.length ? `\u2191\u2193 choose \u00b7 space select \u00b7 \u21b5 remove ${chosen.length} (${size(kb)}) \u00b7 esc close` : "\u2191\u2193 choose \u00b7 space select \u00b7 esc close"));
+      .child(h_flex().gap(8).items_center()
+        .child(div().text_size(11).text_color(t.dim).child("click or space selects \u00b7 esc close"))
+        .child(div().flex_1())
+        .when(this.busy, (el) => el.child(div().text_size(11).text_color(t.dim).frames(["\u280b", "\u2819", "\u2839", "\u2838", "\u283c", "\u2834", "\u2826", "\u2827", "\u2807", "\u280f"], 90)))
+        .child(button(t, "wc-cancel", this.freed > 0 ? "Done" : "Cancel", () => this.close()))
+        .child(button(t, "wc-remove", this.busy ? "Removing\u2026" : chosen.length ? `Remove ${chosen.length} \u00b7 ${size(kb) || "0 KB"}` : "Remove", (cx) => cx.spawn(async (cx) => this.removePicked(cx)), { primary: true, disabled: this.busy || chosen.length === 0 })));
   }
 
   render(cx) {
@@ -514,7 +545,10 @@ export default class Worktree extends View {
           .text_color(t.dim)
           .gap(6)
           .when(this.busy, (el) => el.child(div().frames(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"], 90)))
-          .child(this.busy ? "working…" : blocked ? "esc close" : remove ? "↵ remove · esc cancel" : "↵ create · esc cancel"),
+          .child(this.busy ? "working…" : blocked ? "esc close" : remove ? "↵ remove · esc cancel" : "↵ create · esc cancel")
+          .child(div().flex_1())
+          .child(button(t, "w-cancel", "Cancel", () => this.close()))
+          .when(!blocked, (el) => el.child(button(t, "w-go", remove ? "Remove" : "Create", (cx) => this.go(cx), { primary: true, disabled: this.busy }))),
       );
   }
 }

@@ -26,14 +26,20 @@ that are done.
 - **The space menu** (right-click a space; `spaces-ws` → `menu-ws` →
   `worktree-ws`, copies of Herdr's): New worktree, Open worktree and Clean up
   worktrees use this plugin; Remove worktree is still Herdr's.
-- **Clean up** (menu, or `ctrl-d` in the switcher). Every linked checkout with
-  its size and age. One can go only when its branch is merged (a merged PR
-  from that branch, which catches squash merges, or git sees it in
-  `origin/main`, `origin/staging` or `origin/master`), nothing is uncommitted,
-  no commit is missing from every remote, and no pane is in it. Those are
-  chosen by default; the rest are greyed out with the reason. `space`
-  toggles one, Enter removes the chosen ones with `git worktree remove` (never
-  forced) and shows the space freed. Branches stay.
+- **Clean up** (the switcher's "Clean up…" button, `ctrl-d` there, or the space
+  menu). Every linked checkout with its size and age, and badges: "in main"
+  (its branch is merged: a merged PR from it, which catches squash merges, or
+  git sees it in `origin/main`, `origin/staging` or `origin/master`) and "on
+  remote" (no commit missing from every remote). Removing a worktree keeps its
+  branch and commits, so one can go when nothing is uncommitted, every commit
+  is on a remote and no pane is in it. Merged ones are chosen by default;
+  pushed but unmerged ones can be chosen by hand; the rest are greyed out with
+  what would be lost ("uncommitted changes", "2 only on this Mac", "open in a
+  pane"). Click or `space` toggles one; the "Remove N · size" button removes
+  the chosen ones with `git worktree remove` (never forced) and shows the
+  space freed.
+- **Buttons.** The switcher has "+ New worktree" and "Clean up…"; the create,
+  remove and clean up dialogs have Cancel and their action. The keys still work.
 - **The layout** (`main-accounts`): Herdr's default with claude-accounts' usage
   in the status bar, the sidebar's spaces from `spaces-ws` and pane headers from
   `pane-branch`.
