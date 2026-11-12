@@ -65,12 +65,28 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
   running on the previous account with a checkbox each: each shows its last
   prompt, its terminal's title, and whether it's Working or Idle, live. Then "Don't ask again
   (restart automatically)", **Keep as is** and **Restart N sessions**.
+- **Move this session to…** (a dialog, `cmd-alt-m` or `herdr-app do
+  claude-accounts.move-session`, for the terminal focused then): "Claude in
+  {terminal}. The active account and your other sessions stay as they are.",
+  then each account it can go to (every one but the one it runs on; System
+  default only while it's the active account) with its plan, and "API · pay
+  per use" on an Enterprise or Team account. One that needs signing in shows
+  "Sign in again to use this account" and can't be picked. Picking a pay-per-use
+  account asks first: "Move this session to pay per use?", "{email} is billed
+  per API use. This Claude session continues on it, and what it uses from now
+  on is charged per use. The active account and your other sessions stay as
+  they are.", **Cancel** and **Move to pay per use**. With no terminal
+  focused: "Click a Claude terminal first, then choose Move this session to….".
 - **Toasts:** "Restarting N Claude sessions on {account}", "N other sessions
   weren't moved." with **Review**, a terminal waiting for idle, a restart
   that failed with the `claude --resume <session>` command to run by hand,
   "Claude in … is asking a question" with the question a restarted Claude
   stopped at, and "Sign-in link copied. Open it in a private window to sign
-  in with a different account."
+  in with a different account.", and for a move: "Moving Claude in … to
+  {account}" / "It restarts there once it's idle. Your other sessions stay as
+  they are.", "Claude in … is busy" / "It moves to {account} once it's
+  idle.", "Moved Claude in … to {account}", or why it failed with the line to
+  run by hand.
 
 **How it behaves**
 
@@ -166,6 +182,17 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
     its record.
   - A later switch moves restarts still waiting for idle to the account
     selected then, and drops the ones whose terminal is already on it.
+- **Moving one session** (Move this session to…). It runs `resume --terminal
+  <t> --account <id>` for that terminal only: the active account doesn't
+  change, no other terminal is restarted, and the restart is the same one a
+  switch does (waits for idle, resumes the conversation, checks it landed).
+  A pay-per-use account (plan Enterprise or Team) runs nothing until you
+  confirm; Cancel or Esc runs nothing. A move that can't start keeps the
+  dialog open with the CLI's own words ("Terminal t2 isn't running Claude.",
+  "There's no conversation to resume yet in terminal t6: …", a terminal whose
+  program is Claude itself). A started one closes it; its job id goes in the
+  shared value `claude-accounts.moves`, and the footer's toasts follow that
+  job (other plugins' `resume` jobs stay theirs: no toast).
 
 **Install**
 
@@ -194,13 +221,14 @@ scripts/install.sh claude-accounts
     footer in another frame, so it reads key commands too; a layout uses it
     in place of the `workspace-status` mod, and drops the footer.
   - `popup` = `popup.js`, `panel` = `panel.js`, `accounts` = `accounts.js`,
-    `confirm` = `confirm.js`.
+    `confirm` = `confirm.js`, `move` = `move.js`.
   - Pure modules, tested with `node --test`: `store.js` (reading the CLI's
     files), `format.js` (percent, durations, dates, colors, error copy,
     density), `footer-model.js`
     (what the footer, popover and panel draw, and where they open),
-    `accounts-model.js` (what the accounts and confirm views draw) and
-    `toasts.js`.
+    `accounts-model.js` (what the accounts and confirm views draw),
+    `move-model.js` (what the move dialog draws and runs, and S3's
+    `isPayPerUse`) and `toasts.js`.
 - **CLI `mods/claude-accounts/bin/claude-accounts`** (Node, `cli/*.mjs`).
   Every command takes `--json`:
 
@@ -229,12 +257,16 @@ scripts/install.sh claude-accounts
   code against (`accounts.v1.json`, and `list`, `usage`, `terminal`, `use`
   and `resume` with their output shapes) is [CONTRACT.md](CONTRACT.md).
 - **Commands:** `claude-accounts.open-popup`, `claude-accounts.open-panel`,
-  `claude-accounts.open-accounts`, `claude-accounts.open-confirm` and
-  `claude-accounts.refresh`, reached
+  `claude-accounts.open-accounts`, `claude-accounts.open-confirm`,
+  `claude-accounts.move-session` and `claude-accounts.refresh`, reached
   through the footer copy (`herdr-app do claude-accounts.<name>`).
+  `keys.json` binds `cmd-alt-m` to `move-session` (Herdr's palette lists
+  only app commands, and a terminal's right-click menu can't take another
+  plugin's items, so a key is how it's reached).
 - **Herdr functions:** `exec`, `run`, `readTextFile`, `watchFolder`,
   `openOverlay`, `closeOverlay`, `notify`, `shared`, `setShared`, `settings`,
-  `window`, `theme`, `props`, `nextCommand`, `home`, `appHome`.
+  `window`, `theme`, `props`, `nextCommand`, `focused`, `terminals`, `home`,
+  `appHome`.
 - **Programs the CLI runs:** `security find-generic-password` (reads a
   login, never writes one), `/usr/bin/sqlite3` (Orca's settings, read-only),
   `hc` (Herdr's terminals: list, read, type), `claude auth login`,
@@ -286,7 +318,7 @@ overwritten.
 
 - `node --test 'test/*.test.js'` reports `fail 0`, and
   `scripts/check-views.sh claude-accounts/mods/claude-accounts footer popup
-  panel accounts confirm` prints `ok` for each view.
+  panel accounts confirm move` prints `ok` for each view.
 - `claude-accounts list --json` shows System default and each Orca account,
   with the active one marked.
 - The footer shows the active account's session, weekly and Fable usage, and
@@ -294,3 +326,6 @@ overwritten.
   numbers.
 - Switching accounts with a Claude terminal open restarts it on the new
   account (Always restart) or asks first (Ask), and the conversation goes on.
+- Move this session to… moves one terminal's Claude to the picked account,
+  asking first for a pay-per-use one, while the active account and the other
+  terminals stay as they were.

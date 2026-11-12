@@ -591,7 +591,8 @@ export function closedJustNow(ui, now) {
 
 // ── Toasts (D1) ────────────────────────────────────────────────────────────
 // reactState: toasts.react's first argument, from the text of restart.json,
-// pending-switch.json and login-link (null when absent) and the accounts.
+// pending-switch.json and login-link (null when absent), the accounts, and
+// the moves "Move this session to…" started (shared(MOVES_KEY), S4).
 // applyReact(react, state, seen) → { notify, openConfirm, copyLink, seen }:
 // runs toasts.react on a copy of shared("claude-accounts.seen") and says
 // what the footer does: the toasts to post (herdr's notify fields only), the
@@ -599,8 +600,8 @@ export function closedJustNow(ui, now) {
 // (react's `seen` when it returns one, else the copy as react left it), or
 // null when it didn't change. A react that throws does nothing.
 
-export function reactState({ doc, restart, pending, link, now = Date.now() } = {}) {
-  return { restart: readRestart(restart), pendingSwitch: readPendingSwitch(pending), loginLink: readLoginLink(link), accounts: doc, now };
+export function reactState({ doc, restart, pending, link, moves = null, now = Date.now() } = {}) {
+  return { restart: readRestart(restart), pendingSwitch: readPendingSwitch(pending), loginLink: readLoginLink(link), accounts: doc, moves, now };
 }
 
 const NOTIFY_FIELDS = Object.freeze(["title", "body", "level", "timeout", "icon", "action"]);

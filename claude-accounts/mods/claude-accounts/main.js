@@ -9,18 +9,21 @@
 //   panel           the Claude panel: the active account's card, the list
 //   accounts        Manage Accounts…: sign in, add, remove, switch mode (S2)
 //   confirm         Orca's "Switched to {account}" dialog (D8)
+//   move            Move this session to…: one terminal to another account (S4)
 // This file is final (T1): each later task replaces only its own view file.
 // The logic is in the CLI (bin/claude-accounts): the views read its files
 // through store.js and run it with exec. Copies never reach into each other.
 
 import { View, div } from "gpui-kit";
-import { props, nextCommand } from "herdr";
+import { props, nextCommand, focused, terminals } from "herdr";
 import Footer, { refreshUsage } from "./footer.js";
 import Status from "./status.js";
 import Popup, { openPopup } from "./popup.js";
 import Panel, { openPanel } from "./panel.js";
 import Accounts, { openAccounts } from "./accounts.js";
 import Confirm, { openConfirm } from "./confirm.js";
+import Move, { openMove } from "./move.js";
+import { moveTarget } from "./move-model.js";
 
 // A copy without a view is the footer. scripts/check-views.sh rewrites this
 // line in a tmp copy, because herdr-app check draws only the default view.
@@ -33,6 +36,7 @@ const VIEWS = {
   panel: Panel,
   accounts: Accounts,
   confirm: Confirm,
+  move: Move,
 };
 
 // Every key command of the mod ("claude-accounts.<name>" in keys.json, or
@@ -44,6 +48,8 @@ const COMMANDS = {
   "open-panel": () => openPanel(),
   "open-accounts": () => openAccounts(),
   "open-confirm": () => openConfirm(),
+  // The focused terminal, read when the key is pressed (S4).
+  "move-session": () => openMove(moveTarget(focused(), terminals())),
   refresh: () => refreshUsage(),
 };
 

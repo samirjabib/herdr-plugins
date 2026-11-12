@@ -9,6 +9,9 @@
 //     names the toasts say; without it they read "Claude account", as
 //     Orca's label does for an account it doesn't know.
 //   now: epoch ms, Date.now() by default.
+//   moves: shared(MOVES_KEY) (move-model.js), the resume jobs "Move this
+//     session to…" started: { "<job>": { at, where } }. Only these resume
+//     jobs get toasts; any other resume job stays its caller's.
 //   seen: shared(SEEN_KEY), what was already shown: { "<key>": <epoch ms
 //     it was first seen> }, keyed by item id and state (or the switch, or
 //     the link), so each toast shows once.
@@ -45,6 +48,10 @@
 //   per question. Only the person can answer it, and `resume --status`
 //   doesn't carry it, so a caller such as Spotlight couldn't say it. Not in
 //   Orca, which says nothing about a dialog after it restarts a pane.
+//   restart.json, the moves' resume jobs (S4): waitingIdle "Claude in … is
+//     busy" / "It moves to {account} once it's idle.", done "Moved Claude in
+//     … to {account}", and failed, timeout and landedElsewhere as a switch
+//     item's. Cancelled says nothing: the person cancelled it.
 //   login-link: copied, with Orca's "Sign-in link copied…" toast.
 // Herdr's toast draws a title and one line of body, and runs its action
 // when clicked, so Orca's long one-sentence toasts are split at their
@@ -118,6 +125,7 @@ export function react(state, seen) {
   const restart = readWith(s.restart, readRestart);
   const link = readLoginLink(s.loginLink ?? null);
   const label = (id) => accountLabel(accounts, id);
+  const moves = isObject(s.moves) ? s.moves : {};
 
   // What was seen, without what's too old to matter.
   let changed = false;
@@ -191,11 +199,17 @@ export function react(state, seen) {
   const waiting = [];
   const questions = [];
   const failures = [];
+  const moved = [];
   for (const item of restart?.items ?? []) {
     if (item.state === "starting" && typeof item.question === "string" && item.question !== "") {
       if (first(`item:${item.id}:question:${item.question}`) && fresh(item.updatedAt)) {
         questions.push(toast(`Claude in ${where(item)} is asking a question`, `${item.question} Answer it there.`, "warning", item.terminal ? focus(item.terminal) : null));
       }
+    }
+    if (item.kind === "resume" && Object.hasOwn(moves, item.id) && isObject(moves[item.id])) {
+      const toast = moveToast(item, typeof moves[item.id].where === "string" ? moves[item.id].where : where(item), label(item.to));
+      if (toast && first(`item:${item.id}:${item.state}`) && fresh(item.updatedAt)) moved.push(toast);
+      continue;
     }
     if (item.kind !== "switch" || !item.state) continue;
     if (item.state !== "waitingIdle" && !FAILED.has(item.state)) continue;
@@ -209,7 +223,7 @@ export function react(state, seen) {
   } else if (waiting.length > 1) {
     notify.push(toast(`${waiting.length} Claude sessions are busy`, `Each one restarts on ${label(waiting[0].to)} once it's idle.`, "info"));
   }
-  notify.push(...questions, ...failures);
+  notify.push(...questions, ...failures, ...moved);
 
   // ── The sign-in link ────────────────────────────────────────────────────
   if (link && first(`link:${link}`)) {
@@ -218,6 +232,15 @@ export function react(state, seen) {
   }
 
   return { notify, openConfirm, copyLink, seen: changed ? next : null };
+}
+
+// A move's resume job (S4), by its state: null for one with nothing to say.
+function moveToast(item, where, target) {
+  const action = item.terminal ? focus(item.terminal) : null;
+  if (item.state === "waitingIdle") return toast(`Claude in ${where} is busy`, `It moves to ${target} once it's idle.`, "info", action);
+  if (item.state === "done") return toast(`Moved Claude in ${where} to ${target}`, null, "success", action);
+  if (FAILED.has(item.state)) return failure(item, where, target);
+  return null;
 }
 
 // A failed, timed-out or misplaced restart (D8): what happened, and the
