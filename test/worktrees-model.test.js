@@ -91,3 +91,17 @@ test("reading checkouts runs a bounded number of commands at once, results in or
   assert.equal(peak, 2);
   assert.deepEqual(await mapLimit([], 2, async () => 1), []);
 });
+
+// The Files and Changes panels name the checkout exactly as the pane header does,
+// so their copies of model.js (mods cannot import each other) must stay the same.
+test("files-ws and changes-ws name a checkout like the pane header", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const header = await readFile(new URL("../worktrees/mods/pane-branch/model.js", import.meta.url), "utf8");
+  for (const m of ["files-ws", "changes-ws"]) {
+    const copy = await readFile(new URL(`../worktrees/mods/${m}/model.js`, import.meta.url), "utf8");
+    assert.equal(copy, header, `${m}/model.js drifted from pane-branch/model.js`);
+    const { worktreeOf: w, withAlpha: a } = await import(`../worktrees/mods/${m}/model.js`);
+    assert.deepEqual(w("/Users/x/mac-workspace/ag/shop/worktrees/fix-cart/src"), worktreeOf("/Users/x/mac-workspace/ag/shop/worktrees/fix-cart/src"));
+    assert.equal(a("#ffffff18", "1f"), "#ffffff1f");
+  }
+});

@@ -15,6 +15,10 @@ that are done.
   pane's live folder every 5 s (one at a time), since Herdr's own `branch` is empty for
   terminals. The split buttons open the new terminal in that pane's folder,
   not the focused pane's.
+- **Files and Changes panels** (`files-ws`, `changes-ws`, copies of Herdr's).
+  They already follow the focused pane's checkout; a row under the title now
+  says which: the same `<project> › <worktree>` chip (hover: the path) and its
+  branch, read again when the focused folder changes.
 - **Click the chip:** the switcher. Every checkout of the repo with its branch
   and age, filtered as you type. Picking one focuses the pane already in it,
   else opens it as a split on the right with Claude running.
@@ -44,8 +48,8 @@ that are done.
   remove and clean up dialogs have Cancel and their action. The keys still work.
 - **The layout** (`main-accounts`): Herdr's default with claude-accounts' usage
   in the status bar, the sidebar's spaces from `spaces-ws` and pane headers from
-  `pane-branch`.
+  `pane-branch`, and the Files and Changes panels from `files-ws` and `changes-ws`.
 
-**Updates.** The four mods are copies of Herdr's shipped ones, so they don't
+**Updates.** The six mods are copies of Herdr's shipped ones, so they don't
 follow Herdr's updates. If Herdr's own spaces list or pane header gains
 something, clone it again and reapply this plugin's changes.
