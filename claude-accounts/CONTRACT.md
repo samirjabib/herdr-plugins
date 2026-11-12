@@ -49,6 +49,7 @@ change without notice.
 | `label` | string | What to show: `"System default"`, or the account's email. |
 | `email` | string or null | The email the account was saved with (see `signedInAs` when its folder holds another login); System default's login, null when it has none. |
 | `org` | string or null | The organization's name. |
+| `plan` | string or null | The login's plan, for people: `Max 5x`, `Max 20x`, `Max`, `Pro`, `Team` or `Enterprise`; null when there's no login or Claude names a plan this doesn't know. Added in place, so version stays 1. |
 | `configDir` | string or null | Its Claude config folder, the exact `CLAUDE_CONFIG_DIR` its Claude runs with (never normalized). Null for System default. |
 | `isDefault` | boolean | True for System default only. |
 | `needsSignIn` | boolean | Its login is missing or lapsed, or its folder holds someone else's (`signedInAs`): Claude can't run on this account until you sign in again (the plugin shows "Sign in again"). |

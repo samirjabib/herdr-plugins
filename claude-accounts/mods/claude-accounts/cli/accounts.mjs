@@ -118,8 +118,19 @@ const isDir = (path) => {
   }
 };
 
+// The plan a login's oauthAccount names, for people: "Max 5x", "Enterprise",
+// or null for a type this doesn't know. Claude writes organizationType
+// (claude_max, claude_enterprise, …) and, for Max, the tier in
+// organizationRateLimitTier (default_claude_max_5x, …_20x).
+const PLANS = { claude_enterprise: "Enterprise", claude_team: "Team", claude_pro: "Pro", claude_max: "Max" };
+function planOf(account) {
+  const plan = PLANS[text(account?.organizationType)] ?? null;
+  const tier = /_(\d+x)$/.exec(text(account?.organizationRateLimitTier) ?? "");
+  return plan === "Max" && tier ? `Max ${tier[1]}` : plan;
+}
+
 // The login a config dir's .claude.json names (System default's for null):
-// { email, org, orgUuid }, or null when there's none or it can't be read.
+// { email, org, orgUuid, plan }, or null when there's none or it can't be read.
 export function folderLogin(configDir, env = process.env) {
   let state;
   try {
@@ -129,7 +140,7 @@ export function folderLogin(configDir, env = process.env) {
   }
   const account = state?.oauthAccount;
   const email = text(account?.emailAddress);
-  return email ? { email, org: text(account.organizationName), orgUuid: text(account.organizationUuid) } : null;
+  return email ? { email, org: text(account.organizationName), orgUuid: text(account.organizationUuid), plan: planOf(account) } : null;
 }
 
 // ── The state folder's files ────────────────────────────────────────────────
@@ -289,6 +300,7 @@ export async function knownAccounts(home = stateHome(), env = process.env) {
       email,
       org: text(a.org),
       orgUuid,
+      plan: login?.plan ?? null,
       configDir,
       lastAuthenticatedAt: Number.isFinite(a.lastAuthenticatedAt) ? a.lastAuthenticatedAt : null,
       // Anything but "herdr" keeps its folder on remove.
@@ -312,6 +324,7 @@ export async function knownAccounts(home = stateHome(), env = process.env) {
     email: system?.email ?? null,
     org: system?.org ?? null,
     orgUuid: system?.orgUuid ?? null,
+    plan: system?.plan ?? null,
     configDir: null,
     lastAuthenticatedAt: null,
     source: "system",

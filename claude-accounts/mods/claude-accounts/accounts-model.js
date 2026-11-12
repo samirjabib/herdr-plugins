@@ -132,7 +132,7 @@ export function accountsModel({ accounts, settings, dismissed = null, signingIn 
       return {
         id: a.id,
         email: str(a.email) ?? str(a.label) ?? UNNAMED,
-        badges: isActive ? [THIS_DEVICE, "Active"] : [THIS_DEVICE],
+        badges: [str(a.plan), THIS_DEVICE, isActive ? "Active" : null].filter(Boolean),
         subtitle: needsSignIn && !signedInAs ? "Sign in again to use this account" : [str(a.org), date].filter(Boolean).join(" · "),
         hint: signedInAs ? `Now signed in as ${signedInAs}` : null,
         active: isActive,

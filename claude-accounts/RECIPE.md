@@ -45,7 +45,8 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
   own; its row opens the sign-in tab too. "No other accounts" when there are
   none.
 - **Manage Accounts** (a dialog):
-  - One row per account: its email, "This device", `org · date` of its last
+  - One row per account: its email, its plan ("Max 5x", "Enterprise"…),
+    "This device", `org · date` of its last
     sign-in ("Now signed in as {login}" under it when its folder got someone
     else's login), `Sign in again ▾` (its menu: "Copy sign-in link instead")
     and `Remove`. Then `Add account ▾`, with the same menu.
@@ -181,9 +182,13 @@ scripts/install.sh claude-accounts
 
 - **Mod `mods/claude-accounts/`** (`mod.json` `{ "place": "none" }`), one mod
   in views picked by `props.view`:
-  - none or `footer` = `footer.js`: the only copy that reads key commands. It
+  - none or `footer` = `footer.js`: the copy that reads key commands. It
     also keeps the 15-minute timer and the watch on the state folder, and
     turns the CLI's progress into toasts (`toasts.js`).
+  - `status` = `status.js`: Herdr's bottom status bar (machine, branch,
+    agents, the palette hint) with the usage before the hint. It is the
+    footer in another frame, so it reads key commands too; a layout uses it
+    in place of the `workspace-status` mod, and drops the footer.
   - `popup` = `popup.js`, `panel` = `panel.js`, `accounts` = `accounts.js`,
     `confirm` = `confirm.js`.
   - Pure modules, tested with `node --test`: `store.js` (reading the CLI's

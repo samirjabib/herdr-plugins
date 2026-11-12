@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 // claude-accounts T2: the accounts core (D2, D3, D9, D13). The registry and
 // its Orca import, System default, list, use, remove, login (staging,
 // provisioning, the duplicate check and the link capture), settings, the
@@ -301,6 +302,30 @@ test("import-orca again: new Orca accounts and fresh metadata come in; active, s
   ]);
   assert.equal(s.read("active"), "", "not reseeded");
   assert.deepEqual(JSON.parse(s.read("settings.json")), { switchMode: "keep" }, "not reseeded");
+});
+
+test("list names each login's plan from its oauthAccount: Max 5x, Max 20x, Enterprise, Pro, Team; none without one", () => {
+  const s = sandbox();
+  const plans = [
+    [{ organizationType: "claude_max", organizationRateLimitTier: "default_claude_max_5x" }, "Max 5x"],
+    [{ organizationType: "claude_max", organizationRateLimitTier: "default_claude_max_20x" }, "Max 20x"],
+    [{ organizationType: "claude_max" }, "Max"],
+    [{ organizationType: "claude_enterprise", organizationRateLimitTier: "default_raven_enterprise" }, "Enterprise"],
+    [{ organizationType: "claude_pro" }, "Pro"],
+    [{ organizationType: "claude_team" }, "Team"],
+    [{ organizationType: "something_new" }, null],
+    [{}, null],
+  ];
+  const rows = plans.map(([extra], i) => {
+    const id = randomUUID();
+    const login = { emailAddress: `p${i}@example.com`, organizationName: "Org", organizationUuid: randomUUID(), ...extra };
+    return { id, email: login.emailAddress, org: "Org", orgUuid: login.organizationUuid, configDir: signedInDir(join(s.box, `p${i}`), login), lastAuthenticatedAt: 1, source: "herdr" };
+  });
+  writeRegistry(s, rows);
+  writeFileSync(join(s.home, ".claude.json"), JSON.stringify({ oauthAccount: { ...ANA, organizationType: "claude_enterprise" } }));
+  const doc = listJson(s);
+  assert.deepEqual(rows.map((r) => byId(doc, r.id).plan), plans.map(([, label]) => label));
+  assert.equal(byId(doc, "default").plan, "Enterprise", "System default's too");
 });
 
 // ── System default ─────────────────────────────────────────────────────────

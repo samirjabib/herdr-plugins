@@ -105,6 +105,7 @@ function readAccount(a) {
     label: str(a.label) ?? email ?? (isDefault ? "System default" : a.id),
     email,
     org: str(a.org),
+    plan: str(a.plan),
     configDir: str(a.configDir),
     isDefault,
     needsSignIn: a.needsSignIn === true,
