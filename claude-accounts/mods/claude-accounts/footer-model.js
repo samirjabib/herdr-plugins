@@ -41,6 +41,7 @@
 
 import { formatPercent, formatDuration, formatResetsIn, formatUpdated, colorToken, errorCopy, densityLevel } from "./format.js";
 import { MOD, readRestart, readPendingSwitch, readLoginLink } from "./store.js";
+import { PAY_PER_USE_TAG, isPayPerUse, readAutoSwitch } from "./switch-model.js";
 
 const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const isNumber = (v) => typeof v === "number" && Number.isFinite(v);
@@ -109,6 +110,11 @@ const WINDOWS = Object.freeze([
 ]);
 
 const LOADING = "Loading usage…";
+// S5: an Enterprise or Team login is billed per use through the API: its
+// windows (a "0% used 30d") say nothing, so it shows this instead of numbers.
+const API_USAGE = "API usage";
+// Never a number for it: one that needs signing in says that instead.
+const showsApiUsage = (a) => isPayPerUse(a);
 const NO_DATA = "No usage data";
 const SYSTEM_DEFAULT = "System default";
 
@@ -175,7 +181,8 @@ function accountLabel(a) {
 // footerModel → { kind, level, unit, bar, sections, label, warning, signIn,
 //   refresh, tooltip, needs }
 //   kind     "usage", "signIn" (no numbers, the login lapsed), "error" (no
-//            numbers, the last read failed), "loading", "empty"
+//            numbers, the last read failed), "loading", "empty", "api" (an
+//            Enterprise or Team account: "API usage", never a number, S5)
 //   level    format.densityLevel for `width` and the widths this content
 //            needs (`needs`, { full, compact }): "full" (bars and labels),
 //            "compact" (one number per window), "tightest" (the icon and
@@ -217,6 +224,7 @@ const noteText = (n) => (n ? [n.label, n.message].filter(Boolean).join(": ") : n
 // What the footer says, whatever its width.
 function footerContent(account, mode, now) {
   if (!account) return { kind: "loading" };
+  if (showsApiUsage(account)) return account.needsSignIn ? { kind: "signIn", id: account.id } : { kind: "api" };
   const list = windowSections(account);
   if (list.length === 0) {
     if (account.needsSignIn) return { kind: "signIn", id: account.id };
@@ -264,6 +272,9 @@ function footerShape(c, level) {
     s.label = full ? { text: c.copy.label, color: "muted" } : noNumber;
     s.warning = !tightest && !c.calm;
     s.tooltip = c.copy.message;
+  } else if (c.kind === "api") {
+    // Every level keeps the words: there's no number to shrink to.
+    s.label = { text: API_USAGE, color: "muted" };
   } else if (c.kind === "loading") {
     s.label = { text: ELLIPSIS, color: "muted" };
     s.tooltip = LOADING;
@@ -329,8 +340,10 @@ function soonestReset(list, now) {
 }
 
 function usageRow(account, mode, now) {
+  const row = { name: "Claude", kind: "usage", status: null, signIn: null, reset: null, headline: null, metrics: [], lines: 1 };
+  if (account && showsApiUsage(account)) return account.needsSignIn ? { ...row, ...rowState(account) } : { ...row, kind: "api", status: API_USAGE };
   const list = account ? windowSections(account) : [];
-  const row = { name: "Claude", kind: "usage", status: null, signIn: null, reset: null, headline: null, metrics: [], lines: list.length > 3 ? 2 : 1 };
+  row.lines = list.length > 3 ? 2 : 1;
   if (list.length === 0) return { ...row, ...rowState(account) };
   if (mode === "compact") {
     const t = tightestSection(account);
@@ -395,6 +408,9 @@ function creditsLine(c) {
 }
 
 function card(account, now) {
+  if (showsApiUsage(account)) {
+    return { label: accountLabel(account), windows: [], credits: null, notice: account.needsSignIn ? errorCopy("needsSignIn") : { label: null, message: API_USAGE } };
+  }
   const list = windowSections(account);
   return {
     label: accountLabel(account),
@@ -421,15 +437,19 @@ function inlineBars(account, now) {
 
 function accountRow(a, active, now, busy) {
   const signIn = a.needsSignIn ? a.id : null;
-  const bars = active || signIn ? [] : inlineBars(a, now);
+  const api = !signIn && showsApiUsage(a);
+  const bars = active || signIn || api ? [] : inlineBars(a, now);
   return {
     id: a.id,
     label: accountLabel(a),
+    // S3: an Enterprise or Team login is billed per use; a click asks first.
+    tag: isPayPerUse(a) ? PAY_PER_USE_TAG : null,
+    payPerUse: isPayPerUse(a),
     active,
     hint: signIn ? (a.signedInAs ? nowSignedInAs(a.signedInAs) : SIGN_IN_HINT) : null,
     signIn,
     bars,
-    status: !active && !signIn && bars.length === 0 && a.error ? errorCopy(a.error, a.errorDetail).label : null,
+    status: api && !active ? API_USAGE : !active && !signIn && bars.length === 0 && a.error ? errorCopy(a.error, a.errorDetail).label : null,
     disabled: busy || (!signIn && active),
   };
 }
@@ -591,7 +611,8 @@ export function closedJustNow(ui, now) {
 
 // ── Toasts (D1) ────────────────────────────────────────────────────────────
 // reactState: toasts.react's first argument, from the text of restart.json,
-// pending-switch.json and login-link (null when absent) and the accounts.
+// pending-switch.json, login-link and auto-switch.json (null when absent)
+// and the accounts.
 // applyReact(react, state, seen) → { notify, openConfirm, copyLink, seen }:
 // runs toasts.react on a copy of shared("claude-accounts.seen") and says
 // what the footer does: the toasts to post (herdr's notify fields only), the
@@ -599,8 +620,8 @@ export function closedJustNow(ui, now) {
 // (react's `seen` when it returns one, else the copy as react left it), or
 // null when it didn't change. A react that throws does nothing.
 
-export function reactState({ doc, restart, pending, link, now = Date.now() } = {}) {
-  return { restart: readRestart(restart), pendingSwitch: readPendingSwitch(pending), loginLink: readLoginLink(link), accounts: doc, now };
+export function reactState({ doc, restart, pending, link, autoSwitch = null, now = Date.now() } = {}) {
+  return { restart: readRestart(restart), pendingSwitch: readPendingSwitch(pending), loginLink: readLoginLink(link), autoSwitch: readAutoSwitch(autoSwitch), accounts: doc, now };
 }
 
 const NOTIFY_FIELDS = Object.freeze(["title", "body", "level", "timeout", "icon", "action"]);

@@ -482,11 +482,11 @@ test("accounts: one row per saved account: email, This device, org · date, Acti
   assert.equal(m.empty, null);
 });
 
-test("accounts: an account's plan is its first badge, before This device and Active", () => {
+test("accounts: an account's plan is its first badge, then the pay-per-use tag, before This device and Active", () => {
   const raw = JSON.parse(fixture("accounts.v1.json"));
   raw.accounts = raw.accounts.map((a) => ({ ...a, plan: a.id === ANA ? "Enterprise" : a.id === BEN ? "Max 5x" : null }));
   const m = accountsModel({ accounts: readAccounts(JSON.stringify(raw)), settings: readSettings(fixture("settings.json")) });
-  assert.deepEqual(m.rows.map((r) => r.badges), [["Enterprise", "This device", "Active"], ["Max 5x", "This device"]]);
+  assert.deepEqual(m.rows.map((r) => r.badges), [["Enterprise", "API · pay per use", "This device", "Active"], ["Max 5x", "This device"]]);
 });
 
 test("accounts: S2's setting, with Orca's title, help text and three choices", () => {

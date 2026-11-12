@@ -33,6 +33,7 @@
 // pending switch is its readPendingSwitch(); settings its readSettings().
 
 import { formatDate } from "./format.js";
+import { PAY_PER_USE_TAG, isPayPerUse, autoSwitchSetting } from "./switch-model.js";
 
 const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v) => (typeof v === "string" && v.trim() !== "" ? v : null);
@@ -138,7 +139,8 @@ export function accountsModel({ accounts, settings, dismissed = null, signingIn 
       return {
         id: a.id,
         email: str(a.email) ?? str(a.label) ?? UNNAMED,
-        badges: [str(a.plan), THIS_DEVICE, isActive ? "Active" : null].filter(Boolean),
+        // An Enterprise or Team login is billed per use (S3): said after its plan.
+        badges: [str(a.plan), isPayPerUse(a) ? PAY_PER_USE_TAG : null, THIS_DEVICE, isActive ? "Active" : null].filter(Boolean),
         subtitle: needsSignIn && !signedInAs ? "Sign in again to use this account" : [str(a.org), date].filter(Boolean).join(" · "),
         hint: signedInAs ? `Now signed in as ${signedInAs}` : null,
         active: isActive,
@@ -163,6 +165,7 @@ export function accountsModel({ accounts, settings, dismissed = null, signingIn 
       valueLabel: REMOTE_OPTIONS.find((o) => o.value === remote).label,
       options: REMOTE_OPTIONS.map((o) => ({ ...o, selected: o.value === remote })),
     },
+    autoSwitch: autoSwitchSetting(settings),
     signInNote: signingIn ? signInNote(signingIn, list) : null,
   };
 }

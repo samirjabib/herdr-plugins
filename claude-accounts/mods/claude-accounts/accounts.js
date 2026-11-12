@@ -8,7 +8,7 @@
 // accounts while Claude is running in terminals` (Ask / Always restart /
 // Never restart). What it says is accounts-model.js's; this file draws it
 // and runs the CLI. Owner: T7.
-//   props: { view: "accounts" }
+//   props: { view: "accounts", confirmSwitch?: <id> }
 //
 // - A click on an account (or System default) makes it the active one:
 //   `use <id>`. The switch's question or notice comes from the footer
@@ -19,7 +19,12 @@
 //   lands. With "Copy sign-in link instead" the footer copies the link the
 //   CLI captures (login-link) and says so.
 // - Remove asks first (Orca's "Remove Claude Account?"), then `remove <id>`.
-// - The setting runs `settings set switchMode <v>`.
+// - The setting runs `settings set switchMode <v>`; the automatic switch's
+//   `settings set autoSwitch on|off`.
+// - An Enterprise or Team account (billed per use) carries "API · pay per
+//   use", and picking it asks first (switch-model.js payPerUsePrompt), in
+//   place of the list as Remove does. The panel's click on such an account
+//   opens this view with that question (props.confirmSwitch).
 // - One action at a time, as Orca's pane does; a failed one says the CLI's
 //   own line under the list.
 // Data: `list --json` on open (it creates accounts.v1.json the first time),
@@ -32,6 +37,7 @@ import { v_flex, h_flex, Popover } from "gpui-base";
 import { theme, props, run, openOverlay, closeOverlay, exec, readTextFile, watchFolder, home, appHome, shared, setShared } from "herdr";
 import { MOD, FILES, stateDir, cliPath, readAccounts, readSettings } from "./store.js";
 import { accountsList, accountsModel, startSignIn, signInDone, removePrompt, signInArgv, cliError } from "./accounts-model.js";
+import { isPayPerUse, payPerUsePrompt } from "./switch-model.js";
 
 // The view's own shared key: { duplicateDismissed: <email> } (Orca's
 // claudeCopiedSystemDefaultNoticeDismissed).
@@ -51,9 +57,10 @@ const SIGN_IN_TAB = "Claude sign-in";
 const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 
 // The only place that opens it: the popup's and the panel's Manage
-// Accounts… and the open-accounts command.
-export function openAccounts() {
-  return openOverlay({ mod: MOD, kind: "dialog", width: 600, height: 620, props: { view: "accounts" } });
+// Accounts…, the open-accounts command, and the panel's click on a
+// pay-per-use account (confirmSwitch: its id, the question shown first).
+export function openAccounts({ confirmSwitch = null } = {}) {
+  return openOverlay({ mod: MOD, kind: "dialog", width: 600, height: 620, props: { view: "accounts", ...(confirmSwitch ? { confirmSwitch } : {}) } });
 }
 
 export default class Accounts {
@@ -65,6 +72,7 @@ export default class Accounts {
     this.settings = readSettings(null);
     this.menu = null; // the open ▾ menu: "add", "signin:<id>", "mode"
     this.removing = null; // the account Remove asks about
+    this.switching = props()?.confirmSwitch ?? p?.confirmSwitch ?? null; // the pay-per-use account a pick asks about
     this.busy = null; // the action running: "select:<id>", "remove:<id>", "mode"
     this.error = null; // the last action's failure, the CLI's own line
     this.signingIn = null; // startSignIn()'s value while a sign-in tab runs
@@ -161,8 +169,23 @@ export default class Accounts {
     });
   }
 
-  select(cx, id) {
+  // A pay-per-use account asks first (S3); confirmed, or any other, `use`.
+  select(cx, id, confirmed = false) {
+    const account = accountsList(this.doc).find((a) => a.id === id);
+    if (!confirmed && isPayPerUse(account)) {
+      this.switching = id;
+      this.menu = null;
+      cx.notify();
+      return;
+    }
     this.act(cx, `select:${id}`, ["use", id, "--json"]);
+  }
+
+  confirmSwitch(cx) {
+    const id = this.switching;
+    this.switching = null;
+    if (id) this.select(cx, id, true);
+    else cx.notify();
   }
 
   setMode(cx, mode) {
@@ -172,6 +195,15 @@ export default class Accounts {
       return;
     }
     this.act(cx, "mode", ["settings", "set", "switchMode", mode, "--json"]);
+  }
+
+  setAuto(cx, value) {
+    if (value === this.settings.autoSwitch) {
+      this.menu = null;
+      cx.notify();
+      return;
+    }
+    this.act(cx, "auto", ["settings", "set", "autoSwitch", value, "--json"]);
   }
 
   setRemote(cx, value) {
@@ -217,6 +249,7 @@ export default class Accounts {
     cx.stop_propagation();
     if (this.menu) this.menu = null;
     else if (this.removing) this.removing = null;
+    else if (this.switching) this.switching = null;
     else closeOverlay(this.overlay ?? props()?.overlay);
     cx.notify();
   }
@@ -238,6 +271,8 @@ export default class Accounts {
       .child(div().text_size(11).text_color(t.dim).child("Esc"));
 
     if (this.removing) return root.child(header).child(this.removal(t));
+    const asking = this.switching ? payPerUsePrompt(accountsList(this.doc).find((a) => a.id === this.switching), { switchMode: this.settings.switchMode }) : null;
+    if (asking) return root.child(header).child(this.question(t, asking, "switch", () => (this.switching = null), (cx) => this.confirmSwitch(cx), "primary"));
 
     const body = v_flex().id("ca-accounts-body").flex_1().min_h(0).overflow_y_scrollbar()
       .child(v_flex().px(18).pb(16).gap(14)
@@ -273,6 +308,7 @@ export default class Accounts {
         .child(div().h(1).bg(t.border))
         .child(this.settingRow(t, m.setting))
         .child(this.settingRow(t, m.remote, "remote", (cx, v) => this.setRemote(cx, v)))
+        .child(this.settingRow(t, m.autoSwitch, "auto", (cx, v) => this.setAuto(cx, v)))
         .when(Boolean(this.error), (el) => el.child(div().text_size(11.5).text_color(t.blocked).child(this.error ?? ""))));
     return root.child(header).child(body);
   }
@@ -350,17 +386,21 @@ export default class Accounts {
   // Remove's question, in place of the list (Orca's dialog over its pane).
   removal(t) {
     const account = accountsList(this.doc).find((a) => a.id === this.removing) ?? { id: this.removing };
-    const q = removePrompt(account);
+    return this.question(t, removePrompt(account), "remove", () => (this.removing = null), (cx) => this.confirmRemove(cx), "danger");
+  }
+
+  // A question in place of the list: { title, body, cancel, confirm }.
+  question(t, q, key, cancel, confirm, variant) {
     return v_flex().flex_1().min_h(0).px(18).pt(10).pb(14).gap(10)
       .child(div().text_size(14).font_semibold().child(q.title))
       .child(div().text_color(t.muted).child(q.body))
       .child(div().flex_1())
       .child(h_flex().gap(8).justify_end()
-        .child(this.button(t, "ca-accounts-remove-cancel", q.cancel, "outline", true, (cx) => {
-          this.removing = null;
+        .child(this.button(t, `ca-accounts-${key}-cancel`, q.cancel, "outline", true, (cx) => {
+          cancel();
           cx.notify();
         }))
-        .child(this.button(t, "ca-accounts-remove-confirm", q.confirm, "danger", true, (cx) => this.confirmRemove(cx))));
+        .child(this.button(t, `ca-accounts-${key}-confirm`, q.confirm, variant, true, (cx) => confirm(cx))));
   }
 
   // ── Controls ──────────────────────────────────────────────────────────────

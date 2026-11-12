@@ -22,7 +22,7 @@ const BIN = fileURLToPath(new URL("bin/claude-accounts", MOD));
 const source = (f) => readFileSync(new URL(f, MOD), "utf8");
 
 // The final command table (D9, T1's What), in its order.
-const COMMANDS = ["list", "use", "remove", "login", "import-orca", "settings", "usage", "terminal", "restart", "resume"];
+const COMMANDS = ["list", "use", "remove", "login", "import-orca", "settings", "usage", "terminal", "restart", "resume", "auto-switch"];
 
 // ── The sandbox ────────────────────────────────────────────────────────────
 

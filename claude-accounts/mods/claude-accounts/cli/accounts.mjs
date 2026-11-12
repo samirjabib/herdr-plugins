@@ -12,6 +12,8 @@
 //   settings [set switchMode <v>]   ask | restart | keep
 //   settings [set remoteControl <v>] on | off: restarted sessions come back
 //                                   with --remote-control
+//   settings [set autoSwitch <v>]   on | off: switch on its own when the active
+//                                   account runs out (autoswitch.mjs), off by default
 //
 // The registry (accounts.json) is created on first use: every command that
 // reads it, knownAccounts included, imports Orca's accounts first when the
@@ -29,7 +31,13 @@
 // D17), duplicateOf (System default only: the saved account saved with the
 // same email, else null) }.
 //
-// readSettings(home): { switchMode }, "ask" when unset (Orca's default).
+// readSettings(home): { switchMode, remoteControl, autoSwitch }: "ask" when
+// unset (Orca's default), "off" and "off".
+//
+// switchAccount(target, { onlyFrom }): `use`'s whole switch (the active file,
+// the new account's read, the restart setting), shared by the automatic
+// switch. With onlyFrom it does nothing unless that is still the active
+// account. Returns { from, to }.
 
 import { execFile, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -48,8 +56,9 @@ const execFileP = promisify(execFile);
 
 export const SWITCH_MODES = Object.freeze(["ask", "restart", "keep"]);
 export const REMOTE_CONTROL = Object.freeze(["on", "off"]);
+export const AUTO_SWITCH = Object.freeze(["on", "off"]);
 // Each setting the `settings set` command takes, and its values.
-const SETTING_VALUES = { switchMode: SWITCH_MODES, remoteControl: REMOTE_CONTROL };
+const SETTING_VALUES = { switchMode: SWITCH_MODES, remoteControl: REMOTE_CONTROL, autoSwitch: AUTO_SWITCH };
 
 // Orca's copy, word for word (main/claude-accounts/claude-account-selection.ts,
 // claude-account-registration.ts, shared/claude-sign-in-link.ts), with
@@ -181,6 +190,7 @@ export async function readSettings(home = stateHome()) {
   return {
     switchMode: SWITCH_MODES.includes(value.switchMode) ? value.switchMode : "ask",
     remoteControl: value.remoteControl === "on" ? "on" : "off",
+    autoSwitch: value.autoSwitch === "on" ? "on" : "off",
   };
 }
 
@@ -321,6 +331,8 @@ export async function knownAccounts(home = stateHome(), env = process.env) {
       // there now, and it needs a sign-in (D17).
       signedInAs: login && email && !sameLogin(login, { email, orgUuid }) ? login.email : null,
       duplicateOf: null,
+      // The owner keeps it out of the automatic switch (`auto-switch exclude`).
+      autoSwitchExcluded: a.excludeFromAutoSwitch === true,
     };
   });
   const system = folderLogin(null, env);
@@ -341,6 +353,7 @@ export async function knownAccounts(home = stateHome(), env = process.env) {
     login: system,
     signedInAs: null,
     duplicateOf: duplicate?.id ?? null,
+    autoSwitchExcluded: false,
   };
   // A config dir no saved account has reads as System default.
   const active = activeConfigDir ? (saved.find((a) => a.configDir === activeConfigDir)?.id ?? "default") : "default";
@@ -369,11 +382,13 @@ export async function list(args) {
 
 // Writes `active` under the lock (the exact configDir string, empty for
 // System default) and rebuilds accounts.v1.json. Returns { from, to }, the
-// previous and the new account ids.
-async function writeActive(target) {
+// previous and the new account ids. With onlyFrom, an active account other
+// than it is left alone ({ from, to } both the active one).
+async function writeActive(target, onlyFrom) {
   const home = stateHome();
   return withLock(home, async () => {
     const known = await knownAccounts(home);
+    if (onlyFrom !== undefined && known.active !== onlyFrom) return { from: known.active, to: known.active };
     const account = known.accounts.find((a) => a.id === target);
     if (!account) throw unknownAccount(target);
     // Orca refuses a saved account whose folder holds no login; here one that
@@ -397,13 +412,18 @@ function readUsageOf(id) {
   child.unref();
 }
 
-export async function use(args) {
-  const { values, positionals } = parseArgs({ args, options: { json: { type: "boolean" } }, strict: true, allowPositionals: true });
-  if (positionals.length !== 1) throw usageError("use <id|default>");
-  const { from, to } = await writeActive(positionals[0]);
+export async function switchAccount(target, { onlyFrom } = {}) {
+  const { from, to } = await writeActive(target, onlyFrom);
   if (from !== to) readUsageOf(to);
   // The terminals still on `from` follow settings.switchMode (D8, T4).
   if (from !== to) await afterUse(from, to);
+  return { from, to };
+}
+
+export async function use(args) {
+  const { values, positionals } = parseArgs({ args, options: { json: { type: "boolean" } }, strict: true, allowPositionals: true });
+  if (positionals.length !== 1) throw usageError("use <id|default>");
+  const { from, to } = await switchAccount(positionals[0]);
   const { switchMode } = await readSettings(stateHome());
   print(values.json, { from, to, switchMode }, from === to ? `Already on ${to}.` : `Switched from ${from} to ${to}.`);
   return 0;
@@ -463,12 +483,12 @@ export async function settings(args) {
   if (positionals.length === 0) {
     await ensureRegistry(home);
     const current = await readSettings(home);
-    print(values.json, current, `switchMode: ${current.switchMode}\nremoteControl: ${current.remoteControl}`);
+    print(values.json, current, `switchMode: ${current.switchMode}\nremoteControl: ${current.remoteControl}\nautoSwitch: ${current.autoSwitch}`);
     return 0;
   }
   const [verb, key, mode] = positionals;
   if (positionals.length !== 3 || verb !== "set" || !Object.hasOwn(SETTING_VALUES, key) || !SETTING_VALUES[key].includes(mode)) {
-    throw usageError(`settings [set switchMode ${SWITCH_MODES.join("|")} | set remoteControl ${REMOTE_CONTROL.join("|")}]`);
+    throw usageError(`settings [set switchMode ${SWITCH_MODES.join("|")} | set remoteControl ${REMOTE_CONTROL.join("|")} | set autoSwitch ${AUTO_SWITCH.join("|")}]`);
   }
   // The first run seeds settings.json from Orca, so it comes before the set.
   await ensureRegistry(home);

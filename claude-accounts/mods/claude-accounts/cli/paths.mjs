@@ -24,6 +24,7 @@ export const FILES = Object.freeze({
   pendingSwitch: "pending-switch.json",
   live: "live",
   loginLink: "login-link",
+  autoSwitch: "auto-switch.json",
   lock: "lock",
 });
 

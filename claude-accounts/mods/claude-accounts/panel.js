@@ -13,8 +13,10 @@
 // (toasts.react). Orca's refusal (stderr, exit 5) shows under the heading. An
 // account whose login lapsed signs in instead, in a Herdr tab. Opening it asks
 // for the usage that's due (`usage --json`), as Orca's does for the inactive
-// accounts. A copy without an overlay (herdr-app check) only draws what its
-// props give: it runs nothing.
+// accounts. An Enterprise or Team account (billed per use) carries "API ·
+// pay per use", and its click opens Manage Accounts on the question before
+// switching to it (S3), since the panel's height is fixed. A copy without an
+// overlay (herdr-app check) only draws what its props give: it runs nothing.
 
 import { div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
@@ -62,6 +64,10 @@ export default class Panel extends UsageView {
     if (r.disabled) return;
     if (r.signIn) {
       this.leave(() => signInAccount(r.signIn));
+      return;
+    }
+    if (r.payPerUse) {
+      this.leave(() => openAccounts({ confirmSwitch: r.id }));
       return;
     }
     this.busy = true;
@@ -138,6 +144,7 @@ export default class Panel extends UsageView {
         .child(h_flex().w(16).flex_none().justify_center()
           .when(r.active, (el) => el.child(svg(CHECK).size(14).text_color(t.foreground))))
         .child(div().flex_1().min_w(0).truncate().text_color(r.disabled && !r.active ? t.muted : t.foreground).child(r.label))
+        .when(Boolean(r.tag), (el) => el.child(div().flex_none().px(5).rounded(4).border_1().border_color(t.border).text_size(10).text_color(t.muted).child(r.tag ?? "")))
         .when(r.bars.length > 0 || Boolean(r.status), (el) => el.child(v_flex().w(PANEL.bars).flex_none()
           .children(r.bars.map((b) => h_flex().h(PANEL.bar).flex_none().gap(6).items_center()
             .child(usageBar(t, b.fill, b.color, 4).flex_1().min_w(0))

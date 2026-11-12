@@ -173,6 +173,10 @@ still holds its own login, and `needsSignIn` is true from the last usage
 read) is selected, as in Orca, and its card asks you to sign in again, while
 `resume` to it exits 5.
 
+When the owner turns the automatic switch on, the plugin switches through
+this same path on its own (to a Max or Pro account only), so `active` can
+change without a click; read the file again rather than caching it.
+
 ### `resume --terminal <t> --account <id|default> [--message <text>] [--wait <s>] --json`
 
 Restarts the Claude in terminal `<t>` on an account, continuing its

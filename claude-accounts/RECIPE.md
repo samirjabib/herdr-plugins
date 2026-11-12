@@ -5,7 +5,9 @@ of its session, weekly and Fable limits the active Claude account has used,
 and when each one resets. A popover and a panel show every account. Manage
 Accounts signs accounts in, adds and removes them, and picks which one new
 Claude terminals start on. When you switch accounts while Claude is running
-in terminals, those conversations can restart on the new account.
+in terminals, those conversations can restart on the new account. Turned on,
+it switches on its own when the active Max or Pro account runs out, and never
+to an account billed per use.
 
 All the logic is a command-line program, `claude-accounts`, that ships inside
 the mod. The mod only draws and runs it. Other plugins (Spotlight first) read
@@ -25,6 +27,9 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
     only the most-used window's number (`--` when there's none). Never the
     icon alone, which would read as all clear.
   - Signed out: "Sign in to see usage" and a **Sign in** action.
+  - An Enterprise or Team account (billed per use through the API) shows
+    "API usage" at every width, never a bar or a percentage: its usage is
+    in the Claude Console. Signed out, it says "Sign in to see usage".
   - Click it for the popover; click again to close it.
 - **Popover** (above the footer): `Usage`, a refresh button and a
   `Detailed | Compact` toggle for the footer. Then the `Claude` row with
@@ -36,7 +41,11 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
   the `Other accounts` list: each saved account but the active one, with
   their `wk` and `Fable` bars. System default, the Mac's own login (what
   `claude` uses outside Herdr), isn't listed here or in Manage Accounts
-  unless it's the active account. Click one to switch. An
+  unless it's the active account. Click one to switch. An Enterprise or
+  Team account (billed per use through the API) carries an "API · pay per
+  use" tag and "API usage" in place of its bars (the card and the
+  popover's Claude row say "API usage" too when it's active), and its click
+  opens Manage Accounts on the question below. An
   active account that needs signing in keeps its row, with its ✓, to do it
   from there. An account whose login lapsed says "Sign in again to use this
   account", and its row opens the sign-in tab. One whose folder got someone
@@ -46,7 +55,8 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
   none.
 - **Manage Accounts** (a dialog):
   - One row per account: its email, its plan ("Max 5x", "Enterprise"…),
-    "This device", `org · date` of its last
+    "API · pay per use" for an Enterprise or Team plan, "This device",
+    `org · date` of its last
     sign-in ("Now signed in as {login}" under it when its folder got someone
     else's login), `Sign in again ▾` (its menu: "Copy sign-in link instead")
     and `Remove`. Then `Add account ▾`, with the same menu.
@@ -61,6 +71,21 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
     On, every restarted session comes back with `--remote-control`, signed in
     as the new account, so it stays in the Claude app on your phone. A
     session started with `--remote-control` keeps it either way.
+  - **Switch accounts automatically when one runs out**, "At 95% of the
+    5-hour or weekly limit, Herdr moves to the Max or Pro account with the
+    most room left. Never to an API · pay per use account.": On or Off (Off
+    by default).
+  - Picking a pay-per-use account asks first, in place of the list:
+    "Switch to {account}?", "{account} is billed per use through the API,
+    not by a subscription." and, by the switch setting, "New Claudes start
+    on it, and the Claude sessions running now restart on it, so they're
+    billed per use too." (Always restart), "New Claudes start on it, and you
+    pick which running sessions move to it." (Ask) or "New Claudes start on
+    it; the sessions running now stay on their account." (Never restart).
+    **Cancel** and **Switch to pay per use**; Esc cancels. Moving one
+    terminal's session there asks "Move this session to {account}?", "…
+    This terminal's Claude restarts on it; the other sessions stay where
+    they are.", **Move to pay per use**.
 - **Switch dialog** (Ask): "Switched to {account}", the sessions still
   running on the previous account with a checkbox each: each shows its last
   prompt, its terminal's title, and whether it's Working or Idle, live. Then "Don't ask again
@@ -69,8 +94,11 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
   weren't moved." with **Review**, a terminal waiting for idle, a restart
   that failed with the `claude --resume <session>` command to run by hand,
   "Claude in … is asking a question" with the question a restarted Claude
-  stopped at, and "Sign-in link copied. Open it in a private window to sign
-  in with a different account."
+  stopped at, "Sign-in link copied. Open it in a private window to sign
+  in with a different account.", "Switched to {account} automatically" /
+  "{previous} reached 96% of its 5-hour limit.", and "{account} reached 98%
+  of its weekly limit" / "No other Max or Pro account has room, so it stays
+  on {account}."
 
 **How it behaves**
 
@@ -113,6 +141,28 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
     changes (System default's too), or after a sign-in here, its numbers go
     and it's read again. A folder holding someone else's login isn't read at
     all, and its statusline drops are ignored.
+- **Switching on its own** (the setting On).
+  - Every `usage` run (the 15-minute poll and each Claude turn's merge)
+    checks the active account after its reads. When its 5-hour or weekly
+    window is at 95% or more, it switches to the eligible account with the
+    most room left (95 minus its most used of the two), through `use`'s own
+    path, so the switch setting applies to running terminals as for a click.
+  - Eligible: a saved account on a Max or Pro plan, with numbers read in
+    the last 30 minutes, no error, no sign-in needed, and both windows under
+    95%. Never Enterprise or Team (billed per use), never System default or
+    an account of the same login, never one excluded with `claude-accounts
+    auto-switch exclude <id>` (`include <id>` takes it back; no row for it
+    in Manage Accounts).
+  - Only a Max or Pro active account moves: one billed per use was chosen by
+    hand and stays. Stale or failed numbers on the active account move
+    nothing. A saved account with System default's newer numbers for the
+    same login is judged by those, as the footer shows it.
+  - No eligible account with room: it stays, and says so once per window.
+  - No flapping: the new account is under the line, so the next poll does
+    nothing. A full account counts again only once its window resets (the
+    contract drops a window past its reset).
+  - A switch happens only while the account it read is still the active
+    one, so two runs at once switch once.
 - **Which account a terminal runs.** Inside Herdr, the `claude` launcher
   starts each new Claude on the active account. A running terminal's
   account is the config folder holding its live session file.
@@ -199,8 +249,9 @@ scripts/install.sh claude-accounts
     files), `format.js` (percent, durations, dates, colors, error copy,
     density), `footer-model.js`
     (what the footer, popover and panel draw, and where they open),
-    `accounts-model.js` (what the accounts and confirm views draw) and
-    `toasts.js`.
+    `accounts-model.js` (what the accounts and confirm views draw),
+    `switch-model.js` (the pay-per-use tag and question, the automatic
+    switch's setting and toasts) and `toasts.js`.
 - **CLI `mods/claude-accounts/bin/claude-accounts`** (Node, `cli/*.mjs`).
   Every command takes `--json`:
 
@@ -213,6 +264,9 @@ scripts/install.sh claude-accounts
   | `import-orca` | imports Orca's accounts again |
   | `settings [set switchMode ask\|restart\|keep]` | reads or sets the switch setting |
   | `settings set remoteControl on\|off` | restarted sessions come back with `--remote-control` (on) or as they were (off) |
+  | `settings set autoSwitch on\|off` | switches on its own when the active account runs out (on); off by default |
+  | `auto-switch check` | runs the automatic switch's check now and prints its decision |
+  | `auto-switch exclude\|include <id>` | keeps a saved account out of the automatic switch, or back in |
   | `usage [--refresh] [--force] [--account <id>]` | the usage, fetched when due; `--force` has no floor (`use` runs it for the new account) |
   | `terminal <t>` | a Herdr terminal's account, session and status |
   | `restart --cancel <t>` | cancels a terminal's restart or job that hasn't stopped Claude yet |
@@ -251,9 +305,10 @@ overwritten.
 
 | File | Holds |
 |---|---|
-| `accounts.json` | the saved accounts: id, email, org, config folder, last sign-in, and whether Orca or Herdr made it |
+| `accounts.json` | the saved accounts: id, email, org, config folder, last sign-in, whether Orca or Herdr made it, and `excludeFromAutoSwitch` |
 | `active` | the active account's config folder, the exact string; empty for System default |
-| `settings.json` | the switch setting: `ask`, `restart` or `keep` |
+| `settings.json` | the switch setting (`ask`, `restart` or `keep`), `remoteControl` and `autoSwitch` (`on` or `off`) |
+| `auto-switch.json` | the automatic switch's last word: `switched` (from, to, window, percent) or `stuck` (no account had room) |
 | `accounts.v1.json` | what other plugins read: every account with its usage ([CONTRACT.md](CONTRACT.md)) |
 | `usage-state.json` | when each account was fetched, its last data, the login that data was read from, and its failures |
 | `restart.json` | the queued restarts and `resume` jobs, with their progress |

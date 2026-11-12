@@ -46,6 +46,9 @@
 //   doesn't carry it, so a caller such as Spotlight couldn't say it. Not in
 //   Orca, which says nothing about a dialog after it restarts a pane.
 //   login-link: copied, with Orca's "Sign-in link copied…" toast.
+//   autoSwitch: switch-model.js's readAutoSwitch() of auto-switch.json: the
+//     automatic switch, "Switched to {account} automatically", or "{account}
+//     reached N% of its … limit" when no account had room (S2), once each.
 // Herdr's toast draws a title and one line of body, and runs its action
 // when clicked, so Orca's long one-sentence toasts are split at their
 // sentence break, and Review reads "Click to review." Things older than
@@ -54,6 +57,7 @@
 
 import { readAccounts, readLoginLink, readPendingSwitch, readRestart } from "./store.js";
 import { accountLabel } from "./accounts-model.js";
+import { autoSwitchToast, readAutoSwitch } from "./switch-model.js";
 
 // The shared key the footer keeps `seen` in (D1).
 export const SEEN_KEY = "claude-accounts.seen";
@@ -117,6 +121,7 @@ export function react(state, seen) {
   const pending = readWith(s.pendingSwitch, readPendingSwitch);
   const restart = readWith(s.restart, readRestart);
   const link = readLoginLink(s.loginLink ?? null);
+  const autoSwitch = readAutoSwitch(s.autoSwitch ?? null);
   const label = (id) => accountLabel(accounts, id);
 
   // What was seen, without what's too old to matter.
@@ -140,6 +145,10 @@ export function react(state, seen) {
   const notify = [];
   let openConfirm = false;
   let copyLink = null;
+
+  // ── The automatic switch (S2) ───────────────────────────────────────────
+  const auto = autoSwitchToast(autoSwitch, label);
+  if (auto && first(auto.key) && fresh(autoSwitch.at)) notify.push(auto.toast);
 
   // ── The switch's question or notice ─────────────────────────────────────
   const titles = new Map();

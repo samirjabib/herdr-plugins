@@ -27,6 +27,7 @@ import { h_flex } from "gpui-base";
 import { theme, exec, run, notify, openOverlay, closeOverlay, readTextFile, watchFolder, shared, setShared, settings, props, home, appHome, window as appWindow } from "herdr";
 import { FILES, stateDir, cliPath, readAccounts, classifyWatchPaths } from "./store.js";
 import { react } from "./toasts.js";
+import { AUTO_SWITCH_FILE } from "./switch-model.js";
 import { openConfirm } from "./confirm.js";
 import {
   UI_KEY, SEEN_KEY, FOOTER, MERGE_ARGS, REFRESH_ARGS, REFRESH_TIP, usageMode, footerModel, popupSpec, zoomOf, footerBounds, anchorFrom,
@@ -305,9 +306,9 @@ export default class Footer extends UsageView {
 
   // The files again, and what they have to say to the person (D1).
   async reread(cx) {
-    const [restart, pending, link] = await Promise.all([FILES.restart, FILES.pendingSwitch, FILES.loginLink].map(readState));
+    const [restart, pending, link, autoSwitch] = await Promise.all([FILES.restart, FILES.pendingSwitch, FILES.loginLink, AUTO_SWITCH_FILE].map(readState));
     if (await this.reload()) cx.notify();
-    const r = applyReact(react, reactState({ doc: this.doc, restart, pending, link, now: Date.now() }), shared(SEEN_KEY));
+    const r = applyReact(react, reactState({ doc: this.doc, restart, pending, link, autoSwitch, now: Date.now() }), shared(SEEN_KEY));
     if (r.seen) setShared(SEEN_KEY, r.seen);
     for (const n of r.notify) notify(n);
     if (r.openConfirm) openConfirm();
