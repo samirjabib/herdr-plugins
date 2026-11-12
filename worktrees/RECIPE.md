@@ -12,7 +12,7 @@ that are done.
   the full path), the branch, and the agent's status. The middle stays empty so
   the drag grip covers nothing. Folders outside a known layout show their path
   instead of the chip. The branch comes from `git branch --show-current` in the
-  pane's live folder every 3 s, since Herdr's own `branch` is empty for
+  pane's live folder every 5 s (one at a time), since Herdr's own `branch` is empty for
   terminals. The split buttons open the new terminal in that pane's folder,
   not the focused pane's.
 - **Click the chip:** the switcher. Every checkout of the repo with its branch

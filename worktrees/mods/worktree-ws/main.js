@@ -4,7 +4,7 @@
 import { View, div } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, Scrollbar } from "gpui-base";
 import { run, props, closeOverlay, openOverlay, theme, spaces, panes, exec, home } from "herdr";
-import { ROOT, slug, checkoutDir, repoTitle, cleanVerdict, mergedSet, size, withAlpha, usedBy } from "./model.js";
+import { ROOT, slug, checkoutDir, repoTitle, cleanVerdict, mergedSet, size, withAlpha, usedBy, mapLimit } from "./model.js";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 function place(s, all = panes()) {
@@ -273,12 +273,11 @@ export default class Worktree extends View {
     }
     const merged = mergedSet(prs, ...bases);
     const paneList = panes();
-    const rows = await Promise.all(all.map(async (c) => {
-      const [st, ahead, du] = await Promise.all([
-        git(c.path, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on),
-        git(c.path, ["rev-list", "--count", "HEAD", "--not", "--remotes"], this.on),
-        exec("du", ["-sk", c.path], { on: this.on, timeout: 60_000 }).catch(() => null),
-      ]);
+    // Two checkouts at a time, one command at a time each: see mapLimit.
+    const rows = await mapLimit(all, 2, async (c) => {
+      const st = await git(c.path, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on);
+      const ahead = await git(c.path, ["rev-list", "--count", "HEAD", "--not", "--remotes"], this.on);
+      const du = await exec("du", ["-sk", c.path], { on: this.on, timeout: 60_000 }).catch(() => null);
       const row = {
         ...c,
         merged: Boolean(c.branch && merged.has(c.branch)),
@@ -288,7 +287,7 @@ export default class Worktree extends View {
         kb: du && du.code === 0 ? Number(du.stdout.split(/\s/)[0]) || 0 : 0,
       };
       return { ...row, ...cleanVerdict(row) };
-    }));
+    });
     // Merged ones first and chosen by default, then the other removable ones,
     // then those that would lose something; biggest first in each.
     rows.sort((a, b) => b.suggested - a.suggested || b.safe - a.safe || b.kb - a.kb);

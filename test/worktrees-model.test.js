@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { worktreeOf } from "../worktrees/mods/pane-branch/model.js";
-import { checkoutDir, repoTitle, slug, wsBase, cleanVerdict, mergedSet, size, withAlpha, usedBy } from "../worktrees/mods/worktree-ws/model.js";
+import { checkoutDir, repoTitle, slug, wsBase, cleanVerdict, mergedSet, size, withAlpha, usedBy, mapLimit } from "../worktrees/mods/worktree-ws/model.js";
 import { withAlpha as headerAlpha } from "../worktrees/mods/pane-branch/model.js";
 
 const H = "/Users/me";
@@ -75,4 +75,17 @@ test("a checkout in use says who: the agent and its status, else shells", () => 
   assert.equal(usedBy(wt, [{ cwd: wt, app: null, status: null }]), "in use · shell");
   assert.equal(usedBy(wt, [{ cwd: wt, app: null }, { cwd: wt, app: null }]), "in use · 2 shells");
   assert.equal(usedBy(wt, [{ cwd: wt, app: "pi", status: null }]), "in use · Pi");
+});
+
+test("reading checkouts runs a bounded number of commands at once, results in order", async () => {
+  let running = 0, peak = 0;
+  const out = await mapLimit([1, 2, 3, 4, 5, 6, 7], 2, async (n) => {
+    running++; peak = Math.max(peak, running);
+    await new Promise((r) => setTimeout(r, 5));
+    running--;
+    return n * 10;
+  });
+  assert.deepEqual(out, [10, 20, 30, 40, 50, 60, 70]);
+  assert.equal(peak, 2);
+  assert.deepEqual(await mapLimit([], 2, async () => 1), []);
 });

@@ -40,16 +40,20 @@ export default class Pane extends View {
   init(_props, cx) {
     this.hovered = false;
     this.gitBranch = "";
-    cx.timer.every(3000, (cx) => this.refreshBranch(cx));
+    cx.timer.every(5000, (cx) => this.refreshBranch(cx));
     this.refreshBranch(cx);
   }
 
   // panes()[i].branch can be empty for terminals; read it from git in the pane's live folder.
   refreshBranch(cx) {
     const p = this.me();
-    if (!p?.cwd) return;
+    // One git at a time per header: a slow one must not pile up behind the timer.
+    if (!p?.cwd || this.reading) return;
+    this.reading = true;
     cx.spawn(async (cx) => {
-      const r = await exec("git", ["branch", "--show-current"], { cwd: p.cwd, on: p.machine });
+      let r = { code: 1, stdout: "" };
+      try { r = await exec("git", ["branch", "--show-current"], { cwd: p.cwd, on: p.machine }); } catch {}
+      this.reading = false;
       const next = r.code === 0 ? r.stdout.trim() : "";
       if (next !== this.gitBranch) { this.gitBranch = next; cx.notify(); }
     });

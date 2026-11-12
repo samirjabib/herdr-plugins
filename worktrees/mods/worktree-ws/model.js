@@ -75,3 +75,19 @@ export function withAlpha(color, aa) {
   const hex = m[1].length === 3 ? m[1].split("").map((ch) => ch + ch).join("") : m[1].slice(0, 6);
   return `#${hex}${aa}`;
 }
+
+// fn over items with at most `limit` running at once, results in order.
+// Herdr runs with macOS's 256 open-file limit for apps, and every exec holds
+// pipes: reading a dozen checkouts at once ran it out ("Too many open files").
+export async function mapLimit(items, limit, fn) {
+  const out = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      out[i] = await fn(items[i], i);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return out;
+}
