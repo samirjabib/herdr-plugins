@@ -1,0 +1,3 @@
+# Plugin folders of this repo that scripts/install.sh installs first.
+# The main-accounts layout's status bar draws claude-accounts' usage.
+claude-accounts
