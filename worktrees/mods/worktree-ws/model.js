@@ -21,8 +21,9 @@ export const repoTitle = (repo) => wsBase(repo.main)?.split("/").pop() ?? repo.n
 // Removing a worktree keeps its branch and commits; what it can lose is
 // uncommitted work, and commits that exist only on this machine (should the
 // branch be deleted later). So a checkout is removable when it is a linked one
-// on a branch, nothing is uncommitted, every commit is on a remote (pushing or
-// merging puts it there) and no pane is in it. Suggested (chosen by default)
+// (on a branch or detached), nothing is uncommitted, every commit is on a remote (pushing or
+// merging puts it there) and no pane is in it. A detached checkout (no branch,
+// as after `git checkout origin/main`) counts the same: its commit is all it has. Suggested (chosen by default)
 // when its branch is also merged into a base, so the work is in main.
 // open: false, true, or the label of who uses it ("in use · Claude working").
 // { main, branch, merged, dirty, unpushed, open } ->
@@ -30,7 +31,6 @@ export const repoTitle = (repo) => wsBase(repo.main)?.split("/").pop() ?? repo.n
 export function cleanVerdict(c) {
   const why = [];
   if (c.main) why.push("main checkout");
-  if (!c.branch) why.push("detached");
   if (c.dirty) why.push("uncommitted changes");
   if (c.unpushed > 0) why.push(`${c.unpushed} only on this Mac`);
   if (c.open) why.push(typeof c.open === "string" ? c.open : "in use");

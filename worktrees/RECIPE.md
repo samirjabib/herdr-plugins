@@ -32,7 +32,9 @@ that are done.
   git sees it in `origin/main`, `origin/staging` or `origin/master`) and "on
   remote" (no commit missing from every remote). Removing a worktree keeps its
   branch and commits, so one can go when nothing is uncommitted, every commit
-  is on a remote and no pane is in it. Merged ones are chosen by default;
+  is on a remote and no pane is in it, on a branch or detached (as after
+  `git checkout origin/main`; "in main" when its commit is in a base). Merged
+  ones are chosen by default;
   pushed but unmerged ones can be chosen by hand; the rest are greyed out with
   what would be lost ("uncommitted changes", "2 only on this Mac"), or who is
   using it ("in use · Claude working", "in use · shell", in the working color). Click or `space` toggles one; the "Remove N · size" button removes

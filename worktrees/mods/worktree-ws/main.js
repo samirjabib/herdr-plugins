@@ -278,9 +278,14 @@ export default class Worktree extends View {
       const st = await git(c.path, ["--no-optional-locks", "-c", "core.fsmonitor=false", "status", "--porcelain"], this.on);
       const ahead = await git(c.path, ["rev-list", "--count", "HEAD", "--not", "--remotes"], this.on);
       const du = await exec("du", ["-sk", c.path], { on: this.on, timeout: 60_000 }).catch(() => null);
+      // A detached checkout is merged when its commit is already in a base.
+      let inBase = false;
+      if (!c.branch) for (const base of bases.length ? ["origin/main", "origin/staging", "origin/master"] : []) {
+        if ((await git(c.path, ["merge-base", "--is-ancestor", "HEAD", base], this.on)).ok) { inBase = true; break; }
+      }
       const row = {
         ...c,
-        merged: Boolean(c.branch && merged.has(c.branch)),
+        merged: c.branch ? merged.has(c.branch) : inBase,
         dirty: !st.ok || st.out !== "",
         unpushed: ahead.ok ? Number(ahead.out) || 0 : 1,
         open: usedBy(c.path, paneList),

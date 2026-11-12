@@ -39,7 +39,9 @@ test("clean up removes a checkout only when nothing in it can be lost", () => {
   assert.deepEqual(cleanVerdict({ ...ok, open: true }).why, ["in use"]);
   assert.deepEqual(cleanVerdict({ ...ok, open: "in use · Claude working" }).why, ["in use · Claude working"]);
   assert.equal(cleanVerdict({ ...ok, main: true }).safe, false);
-  assert.equal(cleanVerdict({ ...ok, branch: null }).safe, false);
+  // Detached (after `git checkout origin/main`): nothing to lose when its commit is on a remote.
+  assert.deepEqual(cleanVerdict({ ...ok, branch: null }), { safe: true, suggested: true, inMain: true, onRemote: true, why: [] });
+  assert.deepEqual(cleanVerdict({ ...ok, branch: null, unpushed: 1 }).why, ["1 only on this Mac"]);
 });
 
 test("a pushed branch not merged yet can go but isn't suggested", () => {
