@@ -3,6 +3,8 @@
 //   (none), footer  the usage in the sidebar's status row (S1). The copy that
 //                   always lives: the only one that reads key commands, and
 //                   the one that keeps the timer and the watch (T6).
+//   status          Herdr's status bar with the usage before the palette
+//                   hint; a footer in another frame, so it listens too
 //   popup           the popover above the footer
 //   panel           the Claude panel: the active account's card, the list
 //   accounts        Manage Accounts…: sign in, add, remove, switch mode (S2)
@@ -14,6 +16,7 @@
 import { View, div } from "gpui-kit";
 import { props, nextCommand } from "herdr";
 import Footer, { refreshUsage } from "./footer.js";
+import Status from "./status.js";
 import Popup, { openPopup } from "./popup.js";
 import Panel, { openPanel } from "./panel.js";
 import Accounts, { openAccounts } from "./accounts.js";
@@ -25,6 +28,7 @@ const DEFAULT_VIEW = "footer";
 
 const VIEWS = {
   footer: Footer,
+  status: Status,
   popup: Popup,
   panel: Panel,
   accounts: Accounts,
@@ -50,7 +54,7 @@ export default class ClaudeAccounts extends View {
     const V = VIEWS[this.name];
     this.view = V ? new V() : null;
     this.view?.init?.(pr, cx);
-    if (this.name === "footer") this.listen(cx);
+    if (this.name === "footer" || this.name === "status") this.listen(cx);
   }
 
   listen(cx) {

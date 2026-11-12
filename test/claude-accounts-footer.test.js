@@ -638,7 +638,7 @@ test("pickNotify: only herdr's notify fields, and only with a title", () => {
 // its calls, a click is its handler called by hand, cx's sleeps return at once
 // and a watch wakes when a test says so.
 
-const HERDR = ["theme", "props", "run", "notify", "openOverlay", "closeOverlay", "exec", "readTextFile", "watchFolder", "shared", "setShared", "settings", "home", "appHome", "window", "nextCommand"];
+const HERDR = ["theme", "props", "run", "notify", "openOverlay", "closeOverlay", "exec", "readTextFile", "watchFolder", "shared", "setShared", "settings", "home", "appHome", "window", "nextCommand", "spaces", "agents", "keys"];
 const FAKES = {
   herdr: HERDR.map((n) => `export const ${n} = (...a) => globalThis.__caFake.${n}(...a);`).join("\n"),
   "gpui-kit": `const k = (n) => (...a) => globalThis.__caFake.el(n, ...a);
@@ -791,6 +791,9 @@ function newWorld({ files = {}, props = null, hasWindow = true } = {}) {
     appHome: () => "/fake/app",
     window: () => (w.hasWindow ? { platform: "macos" } : null),
     nextCommand: () => new Promise(() => {}),
+    spaces: () => w.spaces ?? [{ active: true, branch: "feat/x" }],
+    agents: () => w.agents ?? [{ status: "working" }, { status: "blocked" }],
+    keys: () => [{ section: "global", action: "app.palette", keys: "cmd-shift-p" }],
   };
   return w;
 }
@@ -798,6 +801,7 @@ function newWorld({ files = {}, props = null, hasWindow = true } = {}) {
 const { default: Footer, refreshUsage } = await import("../claude-accounts/mods/claude-accounts/footer.js");
 const { default: Popup, openPopup } = await import("../claude-accounts/mods/claude-accounts/popup.js");
 const { default: Panel, openPanel } = await import("../claude-accounts/mods/claude-accounts/panel.js");
+const { default: Status } = await import("../claude-accounts/mods/claude-accounts/status.js");
 
 // Numbers relative to the clock, because the views read Date.now() themselves.
 const H3M2 = (3 * 60 + 2) * MIN + 30_000;
@@ -1325,4 +1329,39 @@ test("panel view: without an overlay (herdr-app check) it runs nothing", async (
   assert.deepEqual(world.execs, []);
   assert.equal(world.watches.length, 0);
   assert.match(textOf(view.render()), /Not yet updated/);
+});
+
+// ── The status bar view ──────────────────────────────────────────────────────
+
+async function statusBar() {
+  const world = newWorld({ files: { "accounts.v1.json": liveDoc() } });
+  const view = new Status();
+  view.init({}, world.cx);
+  await flush();
+  return { world, view };
+}
+
+test("status view: the workspace, branch and agents, then the usage, then the commands hint last", async () => {
+  const { view, world } = await statusBar();
+  const root = view.render();
+  root.handlers.size_change({ width: 1400, height: 28 }, world.cx);
+  assert.equal(textOf(view.render()), "This computer feat/x 2 agents · 1 needs you Used 41% 3h 2m · 65% 4d 6h · 22% Fable ⌘⇧P  commands");
+  assert.ok(find(view.render(), "ca-footer-refresh"), "the refresh button");
+});
+
+test("status view: a narrow bar keeps the usage short, before the hint", async () => {
+  const { view, world } = await statusBar();
+  view.render().handlers.size_change({ width: 760, height: 28 }, world.cx);
+  assert.match(textOf(view.render()), /agents · 1 needs you Used 41% · 65% · 22% ⌘⇧P {2}commands$/);
+});
+
+test("status view: the usage opens the popover from its own bounds, the hint opens the palette, and it keeps the footer's merge", async () => {
+  const { view, world } = await statusBar();
+  assert.ok(world.execs.length >= 1, "it merges like the footer");
+  const usage = find(view.render(), "ca-status-usage");
+  usage.handlers.mouse_down({ bounds: { x: 600, y: 772, width: 220, height: 28 } }, world.cx);
+  find(usage, "ca-footer-usage").handlers.click({}, world.cx);
+  assert.deepEqual(world.opened()[0].props.anchor, { x: 610, y: 772, limit: 820 });
+  find(view.render(), "ca-status-palette").handlers.click({}, world.cx);
+  assert.deepEqual(world.log.at(-1), { run: "app.palette", args: undefined });
 });
