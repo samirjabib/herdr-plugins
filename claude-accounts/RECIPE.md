@@ -258,8 +258,15 @@ scripts/install.sh claude-accounts
 - The footer lives in the projects layout's status row
   (`projects-sidebar/layouts/projects.json`), so install `projects-sidebar`
   too and switch to the `projects` layout.
-- New terminals follow the active account only through the `claude`
-  launcher (a wrapper script on the PATH), which reads the `active` file.
+- New terminals and a switch's restarts follow the account only through the
+  `claude` launcher, `mods/claude-accounts/bin/claude`. Put its installed
+  folder first on the PATH inside Herdr, for example in `~/.zshrc`:
+  `[ -n "$HC_TERMINAL_ID" ] && PATH="$HOME/.config/herdr-app/mods/claude-accounts/bin:$PATH"`.
+  It uses `CLAUDE_ACCOUNTS_DIR` when set (even empty), else the first line of
+  `active`, sets or unsets `CLAUDE_CONFIG_DIR`, and runs the next `claude` on
+  the PATH. Outside Herdr it changes nothing. It is not linked into
+  `~/.local/bin`: that `claude` is Claude Code's own. Without it every
+  restart ends as "landed elsewhere" and new Claudes stay on System default.
 - Live numbers between polls need the statusline drop in
   `~/.claude/statusline.sh`.
 - Node 22.15 or newer on the PATH Herdr's `exec` sees.
