@@ -28,6 +28,7 @@ import {
   popupSpec, panelSpec, signInTab, useFailure, reactState, withClosedAt, closedJustNow,
 } from "../claude-accounts/mods/claude-accounts/footer-model.js";
 import { react } from "../claude-accounts/mods/claude-accounts/toasts.js";
+import { formatUpdated } from "../claude-accounts/mods/claude-accounts/format.js";
 
 // The fixtures' "now": Nov 6 2026, 4:20 PM in Bogota.
 const NOW = 1794000000000;
@@ -56,6 +57,52 @@ test("activeAccount: the doc's active account, else System default", () => {
   assert.equal(activeAccount(docWith("default")).id, "default");
   assert.equal(activeAccount(docWith("no-such-id")).id, "default");
   assert.equal(activeAccount(readAccounts(null)), null);
+});
+
+// The saved account and System default can be the same login (duplicateOf).
+// Claudes started outside Herdr refresh only System default, so the saved
+// account's own numbers freeze and its past-reset 5h window disappears.
+function sameLoginDoc({ dupOf = "saved", defaultError = null, defaultAge = 60_000 } = {}) {
+  const week = NOW + 5 * 86_400_000;
+  return readAccounts(JSON.stringify({
+    version: 1,
+    active: "saved",
+    accounts: [
+      {
+        id: "default", label: "System default", email: "me@example.com", isDefault: true, duplicateOf: dupOf,
+        error: defaultError, needsSignIn: false, credits: null, usageUpdatedAt: NOW - defaultAge,
+        usage: { session: { percent: 31, resetsAt: NOW + 3_600_000 }, weekly: { percent: 12, resetsAt: week }, fable: { percent: 0, resetsAt: week }, monthly: null },
+      },
+      {
+        id: "saved", label: "me@example.com", email: "me@example.com", isDefault: false, duplicateOf: null,
+        error: "expired", needsSignIn: false, credits: null, usageUpdatedAt: NOW - 12 * 3_600_000,
+        usage: { session: null, weekly: { percent: 6, resetsAt: week }, fable: { percent: 0, resetsAt: week }, monthly: null },
+      },
+    ],
+  }));
+}
+
+test("activeAccount: a stale saved account shows System default's newer numbers for the same login", () => {
+  const a = activeAccount(sameLoginDoc());
+  assert.equal(a.id, "saved");
+  assert.equal(a.email, "me@example.com");
+  assert.equal(a.error, null);
+  assert.equal(a.usageUpdatedAt, NOW - 60_000);
+  assert.deepEqual(windowSections(a).map((s) => [s.key, s.percent]), [["session", 31], ["weekly", 12], ["fable", 0]]);
+  const panel = panelModel({ doc: sameLoginDoc(), now: NOW });
+  assert.equal(panel.updated, formatUpdated(NOW - 60_000, NOW));
+});
+
+test("activeAccount: keeps the saved account's own numbers when System default is another login, failing or older", () => {
+  for (const doc of [
+    sameLoginDoc({ dupOf: null }),
+    sameLoginDoc({ defaultError: "rateLimited" }),
+    sameLoginDoc({ defaultAge: 24 * 3_600_000 }),
+  ]) {
+    const a = activeAccount(doc);
+    assert.equal(a.error, "expired");
+    assert.deepEqual(windowSections(a).map((s) => [s.key, s.percent]), [["weekly", 6], ["fable", 0]]);
+  }
 });
 
 test("windowSections: Orca's order, Session, Weekly, Fable, Monthly, only the windows there", () => {

@@ -19,7 +19,9 @@
 //
 //   UI_KEY, SEEN_KEY, MODES             the shared keys, and Detailed | Compact
 //   usageMode(ui), withUsageMode(ui, m) the footer's mode (D12)
-//   activeAccount(doc)                  the active account, else System default
+//   activeAccount(doc)                  the active account, else System default;
+//                                       a stale saved account shows System
+//                                       default's newer numbers for the same login
 //   windowSections(account)             its windows, in Orca's order
 //   tightestSection(account)            the most used one
 //   footerModel({ doc, mode, width, now })   the footer at its density level
@@ -112,7 +114,20 @@ const SYSTEM_DEFAULT = "System default";
 
 export function activeAccount(doc) {
   const accounts = Array.isArray(doc?.accounts) ? doc.accounts : [];
-  return accounts.find((a) => a.id === doc.active) ?? accounts.find((a) => a.isDefault) ?? null;
+  const active = accounts.find((a) => a.id === doc.active) ?? accounts.find((a) => a.isDefault) ?? null;
+  return withSameLoginUsage(active, accounts.find((a) => a.isDefault) ?? null);
+}
+
+// System default and a saved account can be the same login (System default's
+// duplicateOf). Claudes started outside Herdr refresh only System default, so
+// the saved account's own numbers freeze and its 5h window drops once it
+// resets. When System default has newer, healthy numbers for that login, the
+// active account shows them; its id, email and sign-in state stay its own.
+function withSameLoginUsage(active, def) {
+  if (!active || !def || active.isDefault || def.duplicateOf !== active.id) return active;
+  if (def.error || def.needsSignIn || active.needsSignIn || !isNumber(def.usageUpdatedAt)) return active;
+  if (isNumber(active.usageUpdatedAt) && active.usageUpdatedAt >= def.usageUpdatedAt) return active;
+  return { ...active, usage: def.usage, credits: def.credits ?? active.credits ?? null, usageUpdatedAt: def.usageUpdatedAt, error: null, errorDetail: null };
 }
 
 // The account's windows that are there: { key, title, short, percent,
