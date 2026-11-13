@@ -6,7 +6,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout, notify } from "herdr";
-import { repoName, worktreeCount, mainPane, mainCheckout, asleep, spacePlace } from "./model.js";
+import { repoName, worktreeCount, mainPane, mainCheckout, asleep, spacePlace, orgOf, ORGS } from "./model.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -69,6 +69,11 @@ export default class Spaces extends View {
     this.reconnecting = JSON.parse(localStorage.getItem("machines.reconnecting") ?? "{}");
     for (const state of Object.values(this.reconnecting)) state.busy = false;
     this.folded = new Set(JSON.parse(localStorage.getItem("machines.folded") ?? "[]"));
+    // Organization tabs: which one is shown ("all" or an ORGS id), and whether the
+    // bar shows at all (click "Spaces" to hide it; hidden lists every space).
+    this.org = localStorage.getItem("spaces.org") ?? "all";
+    this.tabsShown = localStorage.getItem("spaces.tabs") !== "off";
+    this.lastActive = null;
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
     this.refreshLive(cx);
@@ -272,6 +277,50 @@ export default class Spaces extends View {
     });
   }
 
+  // The rows of the organization shown. A jump to a space of another one (from
+  // Agents, a toast) switches the tab with it. The rail and a hidden bar list all.
+  inOrg(rows, collapsed) {
+    const ps = panes();
+    for (const r of rows) r.org = orgOf(place(r.w, ps));
+    const active = rows.find((r) => r.w.active);
+    if (active && active.w.id !== this.lastActive) {
+      this.lastActive = active.w.id;
+      if (this.org !== "all" && active.org !== this.org) this.setOrg(active.org);
+    }
+    this.orgRows = rows;
+    if (collapsed || !this.tabsShown || this.org === "all") return rows;
+    return rows.filter((r) => r.org === this.org);
+  }
+
+  setOrg(org) {
+    this.org = org;
+    try { localStorage.setItem("spaces.org", org); } catch {}
+  }
+
+  // ALL, then each organization with spaces (and the shown one): its count, and a
+  // dot in the needs-you color when an agent in one of its spaces needs you.
+  orgTabs(t) {
+    const rows = this.orgRows ?? [];
+    const tab = (id, label, list) => {
+      const on = this.org === id;
+      const needs = list.some((r) => r.w.status === "blocked");
+      return h_flex().id(`org-${id}`).h(22).px(7).gap(4).flex_none().items_center().rounded(6)
+        .text_size(10.5).font_semibold().text_color(on ? t.foreground : t.dim)
+        .when(on, (el) => el.bg(t.selected))
+        .when(!on, (el) => el.hover((s) => s.bg(t.hover).text_color(t.foreground)))
+        .cursor_pointer()
+        .on_click((_e, cx) => { this.setOrg(id); cx.notify(); })
+        .child(label)
+        .when(id !== "all", (el) => el.child(div().font_normal().text_color(t.dim).child(String(list.length))))
+        .when(needs, (el) => el.child(div().size(5).rounded(3).bg(t.blocked)));
+    };
+    return h_flex().px(8).pb(6).gap(2).flex_none().flex_wrap()
+      .child(tab("all", "ALL", rows))
+      .children(ORGS.map(([id, label]) => [id, label, rows.filter((r) => r.org === id)])
+        .filter(([id, , list]) => list.length || this.org === id)
+        .map(([id, label, list]) => tab(id, label, list)));
+  }
+
   // Entering a space lands on its main checkout's pane, where the orchestrator
   // sits; clicking the space you are already in leaves focus where it is.
   open(w) {
@@ -357,7 +406,7 @@ export default class Spaces extends View {
 
   // The rows, under a header per machine once one isn't this computer.
   grouped(t, collapsed) {
-    const rows = this.ordered();
+    const rows = this.inOrg(this.ordered(), collapsed);
     const draw = (r) => (collapsed ? this.compact(r, t) : this.row(r, t));
     const remote = [...new Set([...rows.map(r => r.w.machine).filter(Boolean), ...this.machines.map(m => m.name), ...Object.keys(this.reconnecting)])].sort();
     const loading = m => {
@@ -541,14 +590,26 @@ export default class Spaces extends View {
       changed = true;
     }
     if (changed) setShared("space.colors", kept);
+    // The rows first: they fill this.orgRows, which the tabs count.
+    const rows = this.grouped(t, collapsed);
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
       .child(h_flex().h(31).pl(16).pr(10).items_center().justify_between().text_size(11.5).text_color(t.dim)
         .when(collapsed, el => el.pl(0).pr(0).justify_center())
-        .when(!collapsed, el => el.child("Spaces"))
+        .when(!collapsed, el => el.child(div().id("spaces-title").cursor_pointer().hover((s) => s.text_color(t.foreground))
+          .tooltip(this.tabsShown ? "Hide organization tabs" : "Show organization tabs")
+          .on_click((_e, cx) => {
+            this.tabsShown = !this.tabsShown;
+            try { localStorage.setItem("spaces.tabs", this.tabsShown ? "on" : "off"); } catch {}
+            cx.notify();
+          })
+          .child("Spaces")))
         .child(div().id("space-new").size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
           .on_click(() => run("space.new")).child(svg("mods/workspace-chrome/plus.svg").size(14))))
+      .when(!collapsed && this.tabsShown, (el) => el.child(this.orgTabs(t)))
       .child(v_flex().flex_1().min_h(0).px(collapsed ? 0 : 8).pb(14).overflow_y_scrollbar().mode("always")
         .on_mouse_up("left", (_e, cx) => { this.pressed = null; cx.notify(); })
-        .children(this.grouped(t, collapsed)));
+        .children(rows)
+        .when(!collapsed && !rows.length && this.tabsShown && this.org !== "all", (el) => el.child(
+          div().px(8).py(6).text_size(12).text_color(t.dim).child("No spaces here yet. Use + to open one."))));
   }
 }

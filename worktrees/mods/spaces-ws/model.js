@@ -64,3 +64,12 @@ export function spacePlace(space, ps, live) {
   const named = dirs.filter((d) => projectOf(d) === space.name);
   return named.find((d) => MAIN.test(d)) || named[0] || dirs[0] || space.folder;
 }
+
+// The organization tabs of the Spaces list, in order: mac-workspace's groups,
+// then everything outside them.
+export const ORGS = [["ag", "AG"], ["cs", "CS"], ["personal", "PERSONAL"], ["other", "OTHER"]];
+
+// A folder's organization: its mac-workspace group (`<root>/<group>/...`), else "other".
+export function orgOf(dir) {
+  return /\/mac-workspace\/(ag|cs|personal)\//.exec(`${dir ?? ""}/`)?.[1] ?? "other";
+}

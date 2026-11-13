@@ -167,3 +167,13 @@ test("a space is where its terminals run now, the one of its named project first
   assert.equal(spacePlace({ name: "miss-me", tabs: [{ id: "t1" }] }, ps, {}), `${W}/miss-me/main`);
   assert.equal(spacePlace({ name: "x", tabs: [], folder: "/made" }, ps, live), "/made");
 });
+
+test("a space's organization comes from its mac-workspace group, else other", async () => {
+  const { orgOf } = await import("../worktrees/mods/spaces-ws/model.js");
+  assert.equal(orgOf(`${H}/mac-workspace/ag/shop/main`), "ag");
+  assert.equal(orgOf(`${H}/mac-workspace/cs/site/worktrees/x/src`), "cs");
+  assert.equal(orgOf(`${H}/mac-workspace/personal/herdr-plugins/main`), "personal");
+  assert.equal(orgOf(`${H}/mac-workspace`), "other");
+  assert.equal(orgOf(`${H}/code/app`), "other");
+  assert.equal(orgOf(null), "other");
+});
