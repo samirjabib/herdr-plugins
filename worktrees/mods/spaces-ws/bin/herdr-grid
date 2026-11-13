@@ -48,6 +48,19 @@ settle() {
   die "$1 is still not $2 after 5 s"
 }
 
+# focus <terminal>: pane.focus also applies a moment later; wait (up to 5 s) until the
+# window's focused pane is that terminal's, so a following keep splits the right pane.
+focus() {
+  app pane.focus --terminal "$1"
+  want=$(herdr-app ls | jq -r --arg t "$1" '.spaces[].tabs[].terminals[] | select(.terminal == $t) | .pane')
+  k=0
+  while [ $k -lt 50 ]; do
+    [ "$(herdr-app status | jq -r '.focused_pane // empty')" = "$want" ] && return 0
+    sleep 0.1; k=$((k + 1))
+  done
+  die "focus didn't reach $1 after 5 s"
+}
+
 place() {
   [ -n "$2" ] || die "no anchor: run inside Herdr or pass --anchor <terminal>"
   t=$(address "$1"); [ -n "$t" ] || die "no terminal $1"
@@ -66,13 +79,13 @@ place() {
   plan "$n" | while read -r i target dir; do
     w=$(printf '%s\n' "$workers" | sed -n "${i}p")
     if [ "$target" -eq 0 ]; then to=$anchor; else to=$(printf '%s\n' "$workers" | sed -n "${target}p"); fi
-    app pane.focus --terminal "$to"
+    focus "$to"
     app terminal.keep --terminal "$w" --place "$dir"
     settle "$w" shown
     hc label "$w" "herdr.grid=$anchor" >/dev/null
     hc label "$w" "herdr.grid.i=$i" >/dev/null
   done
-  [ -z "$back" ] || app pane.focus --pane "$back" || true
+  [ -z "$back" ] || herdr-app do pane.focus --pane "$back" >/dev/null 2>&1 || true
   echo "$t: worker $n of $anchor's grid"
 }
 
@@ -90,7 +103,7 @@ merge() {
   back=$(herdr-app status | jq -r '.focused_pane // empty')
   printf '%s\n' "$tabs" | while read -r first rest; do
     app terminal.park --terminal "$first"; settle "$first" hidden
-    app pane.focus --terminal "$dest"
+    focus "$dest"
     app terminal.keep --terminal "$first" --place tab
     settle "$first" shown
     for w in $rest; do place "$w" "$first" >/dev/null; done
@@ -104,11 +117,92 @@ merge() {
     fi
   else echo "closed $from"
   fi
-  [ -z "$back" ] || app pane.focus --pane "$back" || true
+  [ -z "$back" ] || herdr-app do pane.focus --pane "$back" >/dev/null 2>&1 || true
+}
+
+# project <main checkout>: one space and one grid for a whole project. The agent
+# session on main (opened as Claude when there is none) keeps the left column;
+# every agent session in the project's worktrees joins its grid; other terminals
+# of the project (plain shells) move in as tabs of their own. Spaces left empty
+# close by themselves. The space takes the project's name; focus ends on main.
+project() {
+  main=$(cd "$1" 2>/dev/null && pwd -P) || die "no folder $1"
+  repo=$(git -C "$main" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || die "$main is not a git checkout"
+  [ "$repo" = "$main/.git" ] || die "$main is a worktree; pass the project's main checkout"
+  name=$(basename "$main"); [ "$name" = main ] && name=$(basename "$(dirname "$main")")
+
+  # "<space> <terminal> <agent 0|1> <checkout top>" for every shown terminal of this repo.
+  cwds=$(hc ls 2>/dev/null | jq -r '.terminals[] | "\(.address)\t\(.cwd // "")"')
+  rows=$(herdr-app ls | jq -r '.spaces[] | .id as $s | .tabs[].terminals[] | "\($s) \(.terminal) \(if .app then 1 else 0 end)"' |
+    while read -r s t ag; do
+      cwd=$(printf '%s\n' "$cwds" | awk -F '\t' -v t="$t" '$1 == t { print $2 }')
+      [ -n "$cwd" ] || continue
+      r=$(git -C "$cwd" rev-parse --path-format=absolute --git-common-dir 2>/dev/null) || continue
+      [ "$r" = "$repo" ] || continue
+      top=$(cd "$(git -C "$cwd" rev-parse --show-toplevel)" && pwd -P)
+      echo "$s $t $ag $top"
+    done)
+  [ -n "$rows" ] || die "no terminal of $name is open"
+
+  anchor=$(printf '%s\n' "$rows" | awk -v m="$main" '$3 == 1 && $4 == m { print $2; exit }')
+  if [ -z "$anchor" ]; then
+    first=$(printf '%s\n' "$rows" | awk 'NR == 1 { print $2 }')
+    before=$(herdr-app ls | jq -r '[.spaces[].tabs[].terminals[].terminal] | join(" ")')
+    focus "$first"
+    app terminal.open --folder "$main" --argv '["claude"]' --place tab --name "$name · main"
+    k=0
+    while [ -z "$anchor" ] && [ $k -lt 50 ]; do
+      anchor=$(herdr-app ls | jq -r --arg b " $before " '[.spaces[].tabs[].terminals[].terminal | select(. as $x | $b | contains(" " + $x + " ") | not)][0] // empty')
+      [ -n "$anchor" ] || { sleep 0.1; k=$((k + 1)); }
+    done
+    [ -n "$anchor" ] || die "the Claude session on main didn't open"
+    echo "opened $anchor: Claude on $main"
+  fi
+  into=$(herdr-app ls | jq -r --arg t "$anchor" '.spaces[] | select(any(.tabs[].terminals[]; .terminal == $t)) | .id')
+
+  # The main session may sit in another project's space: never take that space
+  # over. Open a space of the project's own and bring the main session there.
+  ours=" $(printf '%s\n' "$rows" | awk '{ printf "%s ", $2 }')"
+  foreign=$(herdr-app ls | jq -r --arg s "$into" --arg o "$ours" \
+    '[.spaces[] | select(.id == $s) | .tabs[].terminals[].terminal | select(. as $x | $o | contains(" " + $x + " ") | not)] | length')
+  if [ "$foreign" -gt 0 ]; then
+    before=$(herdr-app ls | jq -r '[.spaces[].id] | join(" ")')
+    app space.new --name "$name" --folder "$main"
+    k=0 new=
+    while [ -z "$new" ] && [ $k -lt 50 ]; do
+      new=$(herdr-app ls | jq -r --arg b " $before " '[.spaces[] | .id | select(. as $x | $b | contains(" " + $x + " ") | not)][0] // empty')
+      [ -n "$new" ] || { sleep 0.1; k=$((k + 1)); }
+    done
+    [ -n "$new" ] || die "the $name space didn't open"
+    shell=$(herdr-app ls | jq -r --arg s "$new" '[.spaces[] | select(.id == $s) | .tabs[].terminals[].terminal][0] // empty')
+    app terminal.park --terminal "$anchor"; settle "$anchor" hidden
+    focus "$shell"
+    app terminal.keep --terminal "$anchor" --place tab; settle "$anchor" shown
+    app pane.close --pane "$(herdr-app ls | jq -r --arg t "$shell" '.spaces[].tabs[].terminals[] | select(.terminal == $t) | .pane')"
+    echo "$anchor: moved out of $into into its own space $new"
+    into=$new
+  fi
+
+  # Worktree agents join the grid, in the order the window lists them.
+  printf '%s\n' "$rows" | awk -v m="$main" -v a="$anchor" '$3 == 1 && $4 != m && $2 != a { print $2 }' |
+    while read -r w; do place "$w" "$anchor"; done
+  # Everything else of the project outside the main space comes in as its own tab.
+  printf '%s\n' "$rows" | awk -v i="$into" -v a="$anchor" '$1 != i && $2 != a && !($3 == 1) { print $2 }' |
+    while read -r w; do
+      shown "$w" || continue
+      app terminal.park --terminal "$w"; settle "$w" hidden
+      focus "$anchor"
+      app terminal.keep --terminal "$w" --place tab; settle "$w" shown
+      echo "$w: moved in as a tab"
+    done
+  app space.rename --id "$into" --name "$name"
+  focus "$anchor"
+  echo "$name: one space ($into), grid on $anchor"
 }
 
 cmd=${1:-}; [ $# -gt 0 ] && shift
 case $cmd in
+  project) [ $# -eq 1 ] || die "usage: herdr-grid project <main checkout>"; project "$1" ;;
   merge) [ $# -eq 2 ] || die "usage: herdr-grid merge <from space> <into space>"; merge "$1" "$2" ;;
   plan) [ $# -eq 1 ] || die "usage: herdr-grid plan <n>"; plan "$1" ;;
   place)

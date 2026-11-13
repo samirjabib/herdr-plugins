@@ -196,3 +196,8 @@ export function clickTarget(row) {
 
 // How many spaces a row merges, shown only when more than one.
 export const spaceCount = (row) => (row.spaces.length > 1 ? String(row.spaces.length) : "");
+
+// A project spread over several spaces: a click gathers it into one space and
+// one grid (herdr-grid project), main's session on the left.
+export const needsGather = (row) => row.spaces.length > 1 && Boolean(row.path && mainCheckout(row.path));
+export const gatherArgs = (main) => ["-c", 'exec "$HOME/.local/bin/herdr-grid" project "$1"', "sh", main];

@@ -100,6 +100,12 @@ project's main up to date.
   first, then the ones under them); focus jumps there and comes back.
   `herdr-grid merge <from space> <into space>` moves every tab of a duplicate
   space into the project's space and closes the empty one; no terminal ends.
+  `herdr-grid project <main checkout>` gathers a whole project: its Claude
+  session on main (one is opened when there is none) keeps the left column,
+  every Claude session in its worktrees joins the grid, plain shells move in as
+  tabs, and a main session sitting in another project's space gets a space of
+  its own first. Clicking a Spaces row whose project is in more than one space
+  runs it.
 - **The layout** (`main-accounts`): Herdr's default with claude-accounts' usage
   in the status bar, the sidebar's spaces from `spaces-ws`, the Agents list from
   `agents-ws`, pane headers from `pane-branch`, and the Files and Changes panels

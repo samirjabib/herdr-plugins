@@ -230,3 +230,14 @@ test("hover groups agents under their space's name when the row has several spac
   // A space without agents still shows, so the hover names every space of the row.
   assert.equal(rowTooltip(agents.slice(0, 1), { kind: "fresh" }, spaces), "mac-workspace\n  orchestrator · working\nfix-nav\n  no agents");
 });
+
+test("a project spread over several spaces is gathered into one grid on click", async () => {
+  const { needsGather, gatherArgs } = await import("../worktrees/mods/spaces-ws/model.js");
+  const s = (id) => ({ id, active: false });
+  const repo = "/Users/x/mac-workspace/ag/miss-me/main/.git";
+  assert.equal(needsGather({ path: repo, spaces: [s("a"), s("b")] }), true);
+  assert.equal(needsGather({ path: repo, spaces: [s("a")] }), false, "one space: just select it");
+  assert.equal(needsGather({ path: null, spaces: [s("a"), s("b")] }), false, "not a git project: nothing to gather");
+  assert.deepEqual(gatherArgs("/Users/x/mac-workspace/ag/miss-me/main"),
+    ["-c", 'exec "$HOME/.local/bin/herdr-grid" project "$1"', "sh", "/Users/x/mac-workspace/ag/miss-me/main"]);
+});

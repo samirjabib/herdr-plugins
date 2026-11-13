@@ -12,7 +12,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, machines, panes, agents, terminals, focused, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout, notify, nextCommand } from "herdr";
-import { mainCheckout, mainState, groupRows, rowActivity, sortRows, rank, dotsShown, rowTooltip, procText, updateArgs, updateToast, contiguousOrder, freshRequest, dropOrder, clickTarget, spaceCount } from "./model.js";
+import { mainCheckout, mainState, groupRows, rowActivity, sortRows, rank, dotsShown, rowTooltip, procText, updateArgs, updateToast, needsGather, gatherArgs, contiguousOrder, freshRequest, dropOrder, clickTarget, spaceCount } from "./model.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -100,6 +100,22 @@ export default class Spaces extends View {
       notify(updateToast(row.name, r));
       this.updating.delete(row.repo);
       this.refreshGit(Object.keys(this.git).filter((k) => this.git[k]?.repo === row.repo), cx);
+      cx.notify();
+    });
+  }
+
+  // A click: a project in several spaces is gathered into one grid first.
+  open(r, cx) {
+    if (!needsGather(r) || this.gathering) return run("space.select", { id: clickTarget(r).id });
+    this.gathering = true;
+    notify({ title: `${r.name}: gathering ${r.spaces.length} spaces into one grid…` });
+    cx.spawn(async (cx) => {
+      const res = await exec("sh", gatherArgs(mainCheckout(r.path)), { on: r.target.machine, timeout: 180000 }).catch(() => null);
+      this.gathering = false;
+      if (!res || res.code !== 0) {
+        notify({ title: `${r.name}: couldn't gather (${(res?.stderr || "herdr-grid not installed").trim().split("\n").pop()})`, level: "warning" });
+        run("space.select", { id: clickTarget(r).id });
+      }
       cx.notify();
     });
   }
@@ -501,7 +517,7 @@ export default class Spaces extends View {
         this.pressed = null;
         this.over = null;
         if (from && over === r.key && from.key !== r.key) this.drop(from, r);
-        else if (from?.key === r.key) run("space.select", { id: clickTarget(r).id });
+        else if (from?.key === r.key) this.open(r, cx);
         cx.notify();
       })
       .on_mouse_down("right", () => this.menu(r.target))
@@ -531,7 +547,7 @@ export default class Spaces extends View {
       .tooltip(tip)
       .when(on, (el) => el.bg(t.selected))
       .when(!on, (el) => el.hover((s) => s.bg(t.hover)))
-      .on_click(() => run("space.select", { id: clickTarget(r).id }))
+      .on_click((_e, cx) => this.open(r, cx))
       .on_mouse_down("right", () => this.menu(r.target))
       .child(h_flex().size(24).flex_none().rounded(7).items_center().justify_center()
         .when(need, (el) => el.border(2).border_color(t.blocked))
