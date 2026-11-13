@@ -13,8 +13,11 @@ project's main up to date.
   (`git rev-parse --git-common-dir`), so the main checkout's space and every
   worktree's space are one row, named after the project (`<name>` for
   `.../mac-workspace/<group>/<name>/main`, else the repo's folder). A click
-  goes to the space on the main checkout, else the row's first; spaces
-  outside a repo keep a row each. After the name, left to right:
+  goes to the space on the main checkout, else the row's first; clicking the
+  row again goes to the project's next space, round, so every space is a
+  click away. Spaces outside a repo keep a row each. After the name, left to
+  right:
+  - how many spaces the row merges, when more than one (`2`);
   - a dot per agent in the project's spaces, sub-agents after their parent:
     working (filled, the working color), needs you (the needs-you color), idle
     or done (hollow). One idle agent alone shows no dot;
@@ -30,7 +33,7 @@ project's main up to date.
   Rows that need you come first, then rows with an agent working, then the
   rest in their own order, which dragging a row changes (a row's spaces move
   together and stay next to each other). Hover a row for its agents and their
-  status. The narrow rail shows the avatar, ringed in the needs-you color when
+  status, under each space's name when the row has several. The narrow rail shows the avatar, ringed in the needs-you color when
   something there needs you. The branch isn't in the row: the pane header
   shows it.
 - **Update main** (`⌘⇧U`, or right-click a project → Update main): runs

@@ -12,7 +12,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, machines, panes, agents, terminals, focused, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout, notify, nextCommand } from "herdr";
-import { mainCheckout, mainState, groupRows, rowActivity, sortRows, rank, dotsShown, rowTooltip, procText, updateArgs, updateToast, contiguousOrder, freshRequest, dropOrder } from "./model.js";
+import { mainCheckout, mainState, groupRows, rowActivity, sortRows, rank, dotsShown, rowTooltip, procText, updateArgs, updateToast, contiguousOrder, freshRequest, dropOrder, clickTarget, spaceCount } from "./model.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -463,7 +463,8 @@ export default class Spaces extends View {
     const rowsNow = this.shownRows ?? [];
     const at = (key) => rowsNow.findIndex((x) => x.key === key);
     const pressed = this.pressed && rowsNow.find((x) => x.key === this.pressed);
-    const tip = rowTooltip(r.activity.agents, r.main);
+    const tip = rowTooltip(r.activity.agents, r.main, r.spaces);
+    const count = spaceCount(r);
     return v_flex()
       .relative()
       .id(`space-${r.target.id}`)
@@ -500,7 +501,7 @@ export default class Spaces extends View {
         this.pressed = null;
         this.over = null;
         if (from && over === r.key && from.key !== r.key) this.drop(from, r);
-        else if (from?.key === r.key) run("space.select", { id: r.target.id });
+        else if (from?.key === r.key) run("space.select", { id: clickTarget(r).id });
         cx.notify();
       })
       .on_mouse_down("right", () => this.menu(r.target))
@@ -510,6 +511,7 @@ export default class Spaces extends View {
           .items_center()
           .child(this.avatar(r, t))
           .child(div().flex_shrink(0).max_w(150).truncate().text_color(t.foreground).child(r.name ?? r.target.name))
+          .when(Boolean(count), (el) => el.child(div().flex_none().px(4).rounded(4).bg(t.raised).text_size(10.5).text_color(t.dim).child(count)))
           .child(this.tail(r, t)),
       );
   }
@@ -518,7 +520,7 @@ export default class Spaces extends View {
   compact(r, t) {
     const on = r.spaces.some((s) => s.active);
     const need = rank(r) === 0;
-    const tip = [r.name ?? r.target.name, rowTooltip(r.activity.agents, r.main)].filter(Boolean).join("\n");
+    const tip = [r.name ?? r.target.name, rowTooltip(r.activity.agents, r.main, r.spaces)].filter(Boolean).join("\n");
     return railCell(h_flex()
       .id(`space-${r.target.id}`)
       .w(RAIL_CELL)
@@ -529,7 +531,7 @@ export default class Spaces extends View {
       .tooltip(tip)
       .when(on, (el) => el.bg(t.selected))
       .when(!on, (el) => el.hover((s) => s.bg(t.hover)))
-      .on_click(() => run("space.select", { id: r.target.id }))
+      .on_click(() => run("space.select", { id: clickTarget(r).id }))
       .on_mouse_down("right", () => this.menu(r.target))
       .child(h_flex().size(24).flex_none().rounded(7).items_center().justify_center()
         .when(need, (el) => el.border(2).border_color(t.blocked))

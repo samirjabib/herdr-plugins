@@ -5,7 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   projectName, mainCheckout, mainState, groupRows, rowActivity, sortRows, rank,
-  dotsShown, rowTooltip, procText, updateArgs, updateToast, contiguousOrder, freshRequest, dropOrder,
+  dotsShown, rowTooltip, procText, updateArgs, updateToast, contiguousOrder, freshRequest, dropOrder, clickTarget, spaceCount,
 } from "../worktrees/mods/spaces-ws/model.js";
 
 const H = "/Users/me";
@@ -196,4 +196,37 @@ test("dragging a row moves all its spaces: after the row dropped on when going d
   assert.deepEqual(dropOrder(order, ["a", "a2"], ["c", "c2"]), ["b", "c", "c2", "a", "a2"]);
   assert.deepEqual(dropOrder(order, ["c", "c2"], ["a", "a2"]), ["c", "c2", "a", "a2", "b"]);
   assert.deepEqual(dropOrder(order, ["b"], ["b"]), order);
+});
+
+test("clicking a row goes to its target; clicking it again cycles through the project's spaces", () => {
+  const row = { spaces: [{ id: "m", active: false }, { id: "w1", active: false }, { id: "w2", active: false }] };
+  row.target = row.spaces[0];
+  assert.equal(clickTarget(row).id, "m");
+  row.spaces[0].active = true;
+  assert.equal(clickTarget(row).id, "w1");
+  row.spaces[0].active = false; row.spaces[2].active = true;
+  assert.equal(clickTarget(row).id, "m");
+  const one = { spaces: [{ id: "x", active: true }] };
+  one.target = one.spaces[0];
+  assert.equal(clickTarget(one).id, "x");
+});
+
+test("a row shows how many spaces it merges, only when more than one", () => {
+  assert.equal(spaceCount({ spaces: [{ id: "a" }] }), "");
+  assert.equal(spaceCount({ spaces: [{ id: "a" }, { id: "b" }] }), "2");
+});
+
+test("each agent knows its space; a sub-agent its parent's", () => {
+  const w = world();
+  const a = rowActivity(w.spaces.slice(0, 2), w);
+  assert.deepEqual(a.agents.map((x) => [x.address, x.space]), [["t1", "m"], ["k1", "m"], ["k2", "m"], ["t2", "w"]]);
+});
+
+test("hover groups agents under their space's name when the row has several spaces", () => {
+  const agents = [{ name: "orchestrator", kind: "work", space: "m" }, { name: "worker", kind: "idle", space: "m" }, { name: "fix", kind: "need", space: "w" }];
+  const spaces = [{ id: "m", name: "mac-workspace" }, { id: "w", name: "fix-nav" }];
+  assert.equal(rowTooltip(agents, { kind: "fresh" }, spaces), "mac-workspace\n  orchestrator · working\n  worker · idle\nfix-nav\n  fix · needs you");
+  assert.equal(rowTooltip(agents.slice(0, 1), { kind: "fresh" }, spaces.slice(0, 1)), "orchestrator · working");
+  // A space without agents still shows, so the hover names every space of the row.
+  assert.equal(rowTooltip(agents.slice(0, 1), { kind: "fresh" }, spaces), "mac-workspace\n  orchestrator · working\nfix-nav\n  no agents");
 });

@@ -75,8 +75,9 @@ const isAgent = (t) => Boolean(t?.status || t?.report || t?.program?.agent);
 
 // What runs in a row's spaces. `world`: { agents: agents(), panes: panes(),
 // terminals: terminals() }.
-//   agents  [{ address, name, kind }]: the spaces' agents in order, each
-//           sub-agent (started with hc run, no pane) right after its parent
+//   agents  [{ address, name, kind, space }]: the spaces' agents in order, each
+//           sub-agent (started with hc run, no pane) right after its parent,
+//           in its parent's space
 //   procs   { running, failed }: the other terminals started with hc run from
 //           anything in these spaces (watchers, jobs, dev servers); failed:
 //           one ended with an error (not killed)
@@ -89,18 +90,18 @@ export function rowActivity(spaces, world) {
   const inPanes = new Set((world.panes ?? []).filter((p) => p.terminal && tabs.has(p.tab)).map((p) => p.terminal));
   const agents = [];
   const seen = new Set();
-  const add = (address, status, name) => {
+  const add = (address, status, name, space) => {
     if (seen.has(address)) return;
     seen.add(address);
-    agents.push({ address, name, kind: kind(status) });
+    agents.push({ address, name, kind: kind(status), space });
     for (const k of all) {
       if (k.parent !== address || k.state !== "live" || !isAgent(k)) continue;
-      add(k.address, listedStatus.get(k.address) ?? k.status, k.name || k.program?.name || k.address);
+      add(k.address, listedStatus.get(k.address) ?? k.status, k.name || k.program?.name || k.address, space);
     }
   };
   for (const a of world.agents ?? []) {
     if (!ids.has(a.space)) continue;
-    add(a.address, a.status, term.get(a.address)?.name || a.tab_name || a.program?.name || a.address);
+    add(a.address, a.status, term.get(a.address)?.name || a.tab_name || a.program?.name || a.address, a.space);
   }
   const roots = new Set([...inPanes, ...seen]);
   const rooted = (t) => {
@@ -134,9 +135,16 @@ export const sortRows = (rows) => rows.map((r, i) => [rank(r), i, r]).sort((a, b
 
 const LABEL = { work: "working", need: "needs you", idle: "idle" };
 
-// The hover: each agent and its status, then main's reason; null when there's nothing.
-export function rowTooltip(agents, main) {
-  const lines = agents.map((a) => `${a.name} · ${LABEL[a.kind]}`);
+// The hover: each agent and its status, under its space's name when the row
+// has several `spaces` (every one listed), then main's reason; null when there's nothing.
+export function rowTooltip(agents, main, spaces = []) {
+  const line = (a) => `${a.name} · ${LABEL[a.kind]}`;
+  const lines = spaces.length > 1
+    ? spaces.flatMap((s) => {
+      const mine = agents.filter((a) => a.space === s.id);
+      return [s.name, ...(mine.length ? mine.map((a) => `  ${line(a)}`) : ["  no agents"])];
+    })
+    : agents.map(line);
   if (main?.kind === "warn") lines.push(`main · ${main.why}`);
   if (main?.kind === "behind") lines.push(`main · ${plural(main.n, "commit")} behind`);
   return lines.length ? lines.join("\n") : null;
@@ -178,3 +186,13 @@ export function dropOrder(order, from, onto) {
   const at = down ? rest.indexOf(onto[onto.length - 1]) + 1 : rest.indexOf(onto[0]);
   return [...rest.slice(0, at), ...from, ...rest.slice(at)];
 }
+
+// Where a click on a row goes: its target, and once one of its spaces shows,
+// the next of its spaces (round), so every space of the project is reachable.
+export function clickTarget(row) {
+  const at = row.spaces.findIndex((s) => s.active);
+  return at === -1 ? row.target : row.spaces[(at + 1) % row.spaces.length];
+}
+
+// How many spaces a row merges, shown only when more than one.
+export const spaceCount = (row) => (row.spaces.length > 1 ? String(row.spaces.length) : "");
