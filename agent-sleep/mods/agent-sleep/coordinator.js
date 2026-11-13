@@ -854,7 +854,9 @@ export class Coordinator {
   // would get `x/exit`).
   // manual: the person asked for this sleep, so a terminal on screen is probed too.
   async probe(address, before, { manual = false } = {}) {
-    const shown = () => !manual && this.isVisible(address);
+    // Even then, never the terminal you're typing in: your keys could land
+    // between the probe's and be misread.
+    const shown = () => (manual ? this.isFocused(address) : this.isVisible(address));
     if (shown()) return "visible";
     await this.call(["keys", address, PROBE_KEY]);
     let after = await this.read(address);
@@ -1209,10 +1211,14 @@ export class Coordinator {
     const r = own(this.records, address);
     if (what === "wake") {
       if (r?.state === "asleep") await this.resume(address, "its \u263e");
+      // Still going to sleep: no longer held, so it wakes once shown, as any other.
+      else if (r?.state === "stopping" && r.held === true) await this.save(withRecord(this.records, address, { ...r, held: false }));
       return;
     }
     const key = `terminal:${address}`;
     if (r || this.jobs[key]) return; // asleep, or going to sleep, already
+    // A workspace sleep that already has it queued or under way does it.
+    if (Object.values(this.jobs).some((j) => j.current?.address === address || j.queue.includes(address))) return;
     const [t] = await this.freshTerminals([address]);
     if (!t) return;
     const status = statusWord(t.status);
@@ -1717,6 +1723,10 @@ export class Coordinator {
 
   isVisible(address) {
     return visibleTerminals(this.layout()).has(address);
+  }
+
+  isFocused(address) {
+    return this.safe(() => this.d.live.focused()?.terminal ?? null, null) === address;
   }
 
   stoppingAddress() {

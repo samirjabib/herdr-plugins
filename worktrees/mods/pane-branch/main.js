@@ -55,7 +55,8 @@ export default class Pane extends View {
     if (!addr) return;
     cx.spawn(async (cx) => {
       let rec = null;
-      try { rec = JSON.parse(await readTextFile(`${home()}/.config/herdr-app/agent-sleep/sleeping.json`))?.records?.[addr] ?? null; } catch {}
+      // A read that fails (a write under way) keeps the last known state.
+      try { rec = JSON.parse(await readTextFile(`${home()}/.config/herdr-app/agent-sleep/sleeping.json`))?.records?.[addr] ?? null; } catch { return; }
       const next = rec ? { state: rec.state, held: rec.held === true } : null;
       if (JSON.stringify(next) !== JSON.stringify(this.sleepRec)) { this.sleepRec = next; cx.notify(); }
     });
@@ -68,7 +69,8 @@ export default class Pane extends View {
     const rec = this.sleepRec;
     const held = rec?.held === true && (rec.state === "asleep" || rec.state === "stopping");
     const claude = p.app === "claude-code" || p.program?.agent === true;
-    if (!addr || (!held && !(claude && this.hovered && p.status !== "working" && p.status !== "blocked"))) return null;
+    // agent-sleep's commands name local terminals only (t…).
+    if (!/^t[0-9a-z]+$/.test(addr ?? "") || (!held && !(claude && this.hovered && p.status !== "working" && p.status !== "blocked"))) return null;
     return div()
       .id(`ph-sleep-${p.pane}`)
       .flex_none()
@@ -76,11 +78,11 @@ export default class Pane extends View {
       .rounded(4)
       .text_color(held ? t.accent : t.dim)
       .hover((s) => s.bg(t.hover).text_color(t.foreground))
-      .tooltip(held ? (rec.state === "stopping" ? "Going to sleep\u2026" : "Asleep: click to wake it") : "Sleep this agent (it stays asleep until you click \u263e again)")
+      .tooltip(held ? (rec.state === "stopping" ? "Going to sleep\u2026 click to wake it once it lands" : "Asleep: click to wake it") : "Sleep this agent (it stays asleep until you click \u263e again)")
       .on_click((_e, cx) => {
         cx.stop_propagation();
         run(`agent-sleep.${held ? "wake" : "sleep"}-terminal.${addr}`);
-        this.sleepRec = held ? null : { state: "stopping", held: true };
+        this.sleepRec = held ? (rec.state === "stopping" ? { ...rec, held: false } : null) : { state: "stopping", held: true };
         cx.notify();
       })
       .child(svg("mods/agent-sleep/icons/moon.svg").size(12));
