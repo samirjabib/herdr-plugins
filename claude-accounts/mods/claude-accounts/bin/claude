@@ -32,6 +32,58 @@ if [ -n "${HC_TERMINAL_ID:-}" ]; then
 fi
 unset CLAUDE_ACCOUNTS_DIR
 
+# Inside Herdr, in a mac-workspace checkout, the session gets a name that tells
+# sessions apart at a glance (prompt box, /resume, Remote Control on the phone):
+#   <Mac> · <project> · <worktree, or main> · <account>
+# Not when a name is given by hand or for a print run.
+session_name() {
+  ws=$(cd "$HOME/mac-workspace" 2>/dev/null && pwd -P) || return 1
+  here=$(pwd -P 2>/dev/null) || return 1
+  case $here/ in "$ws"/*) ;; *) return 1 ;; esac
+  rel=${here#"$ws"/}
+  rest=${rel#*/}
+  project=${rest%%/*}
+  [ "$project" != "$rest" ] || return 1
+  rest=${rest#*/}
+  case $rest/ in
+    main/*) tree=main ;;
+    worktrees/*/*) tree=${rest#worktrees/}; tree=${tree%%/*} ;;
+    *) return 1 ;;
+  esac
+  id=
+  [ -r "$HOME/.config/mac-workspace/host" ] && IFS= read -r id < "$HOME/.config/mac-workspace/host"
+  [ -n "$id" ] || id=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
+  id=$(printf %s "$id" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+  mac=$(awk -F'\t' -v id="$id" '$2 == id { print $1; exit }' "$HOME/mac-workspace/hosts/aliases.tsv" 2>/dev/null)
+  name="${mac:-$id} \302\267 $project \302\267 $tree"
+  accounts="$HOME/.config/herdr-app/claude-accounts/accounts.json"
+  if [ -n "${CLAUDE_CONFIG_DIR:-}" ] && [ -r "$accounts" ]; then
+    i=0
+    while dir=$(plutil -extract "$i.configDir" raw -o - "$accounts" 2>/dev/null); do
+      if [ "$dir" = "$CLAUDE_CONFIG_DIR" ]; then
+        who=$(plutil -extract "$i.org" raw -o - "$accounts" 2>/dev/null)
+        case $who in
+          ""|*"'s Organization") who=$(plutil -extract "$i.email" raw -o - "$accounts" 2>/dev/null); who=${who%%@*} ;;
+        esac
+        [ -n "$who" ] && name="$name \302\267 $who"
+        break
+      fi
+      i=$((i + 1))
+    done
+  fi
+  printf '%b' "$name"
+}
+
+if [ -n "${HC_TERMINAL_ID:-}" ]; then
+  want=1
+  for a in "$@"; do
+    case $a in -n|--name|--name=*|-p|--print) want=0 ;; esac
+  done
+  if [ "$want" = 1 ] && name=$(session_name) && [ -n "$name" ]; then
+    set -- --name "$name" "$@"
+  fi
+fi
+
 self=$0
 case $self in
   */*) ;;

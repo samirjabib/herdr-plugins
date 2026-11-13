@@ -187,6 +187,14 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
 - **Which account a terminal runs.** Inside Herdr, the `claude` launcher
   starts each new Claude on the active account. A running terminal's
   account is the config folder holding its live session file.
+- **Session names.** In a mac-workspace checkout (`~/mac-workspace/<group>/<project>/main`
+  or `.../worktrees/<worktree>`), the launcher names the session
+  `<Mac> · <project> · <worktree or main> · <account>`, e.g.
+  `mini · shop-app · pre-order · Work Org` (Mac: its alias in
+  `hosts/aliases.tsv`; account: its org, or its email's name for a personal org).
+  The name shows in the prompt box, `/resume` and Remote Control on the phone,
+  and a switch's restart renames it after the new account. A name given by hand
+  (`-n`/`--name`) or a print run (`-p`) is left alone.
 - **Switching while Claude runs.**
   - Always restart: every Claude terminal on the previous account restarts
     on the new one, continuing its conversation. Ask: the switch dialog

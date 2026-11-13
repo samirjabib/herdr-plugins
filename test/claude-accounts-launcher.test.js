@@ -29,8 +29,8 @@ async function sandbox(t, { active } = {}) {
   return { home: dir, realBin };
 }
 
-function run({ home, realBin }, env, args = [], path = `${LAUNCHER_DIR}:${realBin}:/usr/bin:/bin`) {
-  const r = spawnSync(LAUNCHER, args, { env: { HOME: home, PATH: path, ...env }, encoding: "utf8", timeout: 5000 });
+function run({ home, realBin }, env, args = [], path = `${LAUNCHER_DIR}:${realBin}:/usr/bin:/bin`, cwd = undefined) {
+  const r = spawnSync(LAUNCHER, args, { cwd, env: { HOME: home, PATH: path, ...env }, encoding: "utf8", timeout: 5000 });
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
 
@@ -90,4 +90,55 @@ test("with no other claude on the PATH it fails with a message instead of loopin
   const r = run(s, { HC_TERMINAL_ID: "t1" }, [], `${LAUNCHER_DIR}:/usr/bin:/bin`);
   assert.equal(r.code, 127);
   assert.match(r.err, /no claude found on the PATH/);
+});
+
+// A mac-workspace checkout in the sandbox HOME, this Mac's host id and alias, and
+// the accounts list, for the session name.
+async function workspace(s, rel) {
+  const dir = join(s.home, "mac-workspace", rel);
+  await mkdir(dir, { recursive: true });
+  await mkdir(join(s.home, "mac-workspace/hosts"), { recursive: true });
+  await writeFile(join(s.home, "mac-workspace/hosts/aliases.tsv"), "# alias\thost-id\nair\tmacbook-air\nmini\tsamirs-mac-mini\n");
+  await mkdir(join(s.home, ".config/mac-workspace"), { recursive: true });
+  await writeFile(join(s.home, ".config/mac-workspace/host"), "samirs-mac-mini\n");
+  await writeFile(join(s.home, ".config/herdr-app/claude-accounts/accounts.json"), JSON.stringify([
+    { id: "a", email: "dev@example.com", org: "dev@example.com's Organization", configDir: "/profiles/a/home" },
+    { id: "b", email: "me@work.example", org: "Work Org", configDir: "/profiles/b/home" },
+  ]));
+  return dir;
+}
+const named = (r) => { const a = r.out.split("\n").filter((l) => l.startsWith("arg=")).map((l) => l.slice(4)); const i = a.indexOf("--name"); return i < 0 ? null : a[i + 1]; };
+
+test("inside Herdr, a session is named Mac · project · worktree · account", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/b/home\n" });
+  const cwd = await workspace(s, "ag/shop-app/worktrees/pre-order/src");
+  assert.equal(named(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, cwd)), "mini · shop-app · pre-order · Work Org");
+});
+
+test("the main checkout is named main, and a personal org by its email's name", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/a/home\n" });
+  const cwd = await workspace(s, "personal/tools/main");
+  assert.equal(named(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, cwd)), "mini · tools · main · dev");
+});
+
+test("a switch's restart names the session after the account it switches to", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/a/home\n" });
+  const cwd = await workspace(s, "ag/shop-app/main");
+  assert.equal(named(run(s, { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_DIR: "/profiles/b/home" }, ["--resume", "x"], undefined, cwd)), "mini · shop-app · main · Work Org");
+});
+
+test("a name given by hand, or a print run, is left alone", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/a/home\n" });
+  const cwd = await workspace(s, "ag/shop-app/main");
+  for (const args of [["--name", "mine"], ["-n", "mine"], ["--name=mine"], ["-p", "hi"], ["--print", "hi"]]) {
+    const r = run(s, { HC_TERMINAL_ID: "t1" }, args, undefined, cwd);
+    assert.deepEqual(r.out.split("\n").filter((l) => l.startsWith("arg=")).map((l) => l.slice(4)), args);
+  }
+});
+
+test("outside a mac-workspace checkout, or outside Herdr, no name is added", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/a/home\n" });
+  const cwd = await workspace(s, "ag/shop-app/main");
+  assert.equal(named(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, s.home)), null);
+  assert.equal(named(run(s, {}, [], undefined, cwd)), null);
 });
