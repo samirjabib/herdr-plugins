@@ -145,6 +145,12 @@ export function isLiveMain(cwd, branch) {
 // output redirections (`> file`, `2>&1`, `2>/dev/null`) dropped.
 export function procCommand(argv) {
   if (!argv?.length) return "";
+  // `env [-i] [NAME=value ...] cmd`: the command is what follows the variables.
+  if (String(argv[0]).split("/").pop() === "env") {
+    let i = 1;
+    while (i < argv.length && (/^-/.test(argv[i]) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[i]))) i++;
+    return procCommand(argv.slice(i));
+  }
   const shell = /^(sh|bash|zsh|dash)$/.test(String(argv[0]).split("/").pop());
   const line = shell && /^-[a-z]*c$/.test(argv[1] ?? "") ? String(argv[2] ?? "") : argv.join(" ");
   // Quoted text is kept as is: a '>' inside quotes is an argument, not a redirection.

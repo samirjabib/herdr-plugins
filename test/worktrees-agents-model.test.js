@@ -189,3 +189,9 @@ test("a '>' inside quotes is part of the command, not a redirection", async () =
   assert.equal(procCommand(["sh", "-c", `node -e "a.map(x => x)" > out.log`]), `node -e "a.map(x => x)"`);
   assert.equal(procCommand(["sh", "-c", "echo 'a > b' 2>&1"]), "echo 'a > b'");
 });
+
+test("an env wrapper and its variables are dropped from the shown command", async () => {
+  const { procCommand } = await import("../worktrees/mods/agents-ws/model.js");
+  assert.equal(procCommand(["env", "-i", "PATH=/usr/bin", "NODE_ENV=development", "npx", "react-router", "dev", "--port", "3915"]), "npx react-router dev --port 3915");
+  assert.equal(procCommand(["/usr/bin/env", "A=1", "sh", "-c", "npm test > x.log"]), "npm test");
+});

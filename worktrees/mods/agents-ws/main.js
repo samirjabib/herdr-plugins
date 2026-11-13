@@ -254,6 +254,13 @@ export default class Agents extends View {
     openOverlay({ mod: "agents-ws", kind: "popup", width: 460, height: 320, props: { output: k.address, name: procName(k), state } });
   }
 
+  // Who launched a process: its parent's name, and "(ended)" once that one is gone.
+  parentName(addr) {
+    const p = terminals().find((x) => x.address === addr) ?? this.ended?.[addr];
+    if (!p) return addr;
+    return `${p.name || addr}${p.state && p.state !== "live" ? " (ended)" : ""}`;
+  }
+
   // A process row: tree lines, a ▸, its name, and running / ✓ age / exit code.
   procRow(t, s, now) {
     const k = s.t;
@@ -271,7 +278,7 @@ export default class Agents extends View {
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .on_click(() => this.openOutput(k, state))
-      .tooltip([`${procName(k)} · ${k.address}`, this.cmds?.[k.address] && `$ ${this.cmds[k.address]}`, k.cwd].filter(Boolean).join("\n"))
+      .tooltip([`${procName(k)} · ${k.address}`, k.parent && `from ${this.parentName(k.parent)}`, this.cmds?.[k.address] && `$ ${this.cmds[k.address]}`, k.cwd].filter(Boolean).join("\n"))
       .children(s.lines.map(l => div().self_start().mt(-4).w(9).h(16).mr(4).flex_none()
         .when(Boolean(l), el => el.border_l(1.5).border_color(t.input))
         .when(l === "└" || l === "├", el => el.border_b(1.5).rounded_bl(6))))
@@ -325,6 +332,38 @@ export default class Agents extends View {
         .text_size(12)
         .child(div().flex_1().min_w(0).truncate().text_color(t.foreground).child(`▸ ${p.name}`))
         .when(Boolean(state), el => el.child(div().flex_none().text_size(10.5).text_color(procColor(t, state.kind)).child(state.text)))
+        // Full detail: the live terminal itself, scrollback and all, over the tab
+        // (keep it as a tab from there). A finished process has only this output.
+        .when(k?.state === "live", (el) => el.child(div()
+          .id("output-full")
+          .flex_none()
+          .px(6)
+          .rounded(4)
+          .text_size(11)
+          .text_color(t.dim)
+          .cursor_pointer()
+          .hover((s) => s.bg(t.hover).text_color(t.foreground))
+          .tooltip("Open the full terminal")
+          .on_click(() => { closeOverlay(p.overlay); run("terminal.peek", { terminal: p.output }); })
+          .child("Open \u2197")))
+        // Stop it: ends the process (and anything it started). The list keeps its
+        // row, now ended, like any process that finishes.
+        .when(k?.state === "live", (el) => el.child(div()
+          .id("output-stop")
+          .flex_none()
+          .px(6)
+          .rounded(4)
+          .text_size(11)
+          .text_color(t.ansi1)
+          .cursor_pointer()
+          .hover((s) => s.bg(t.hover))
+          .tooltip("Stop this process")
+          // hc ends a background process; the app's terminal.kill only knows paned ones.
+          .on_click((_e, cx) => cx.spawn(async () => {
+            const r = await hc(["kill", p.output]).catch(() => null);
+            if (r?.code !== 0) run("terminal.kill", { terminal: p.output });
+          }))
+          .child("\u25a0 Stop")))
         .child(div()
           .id("output-close")
           .flex_none()
