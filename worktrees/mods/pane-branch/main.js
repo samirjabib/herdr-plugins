@@ -6,7 +6,7 @@
 
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
-import { panes, props, run, theme, home, layout, exec, openOverlay } from "herdr";
+import { panes, props, run, theme, home, layout, exec, openOverlay, readTextFile } from "herdr";
 import { worktreeOf, withAlpha, mainState } from "./model.js";
 
 // Main's marker: the project's main checkout on main, where to update and orchestrate from.
@@ -43,8 +43,47 @@ export default class Pane extends View {
   init(_props, cx) {
     this.hovered = false;
     this.gitBranch = "";
-    cx.timer.every(5000, (cx) => this.refreshBranch(cx));
+    this.sleepRec = null; // agent-sleep's record of this pane's terminal, if any
+    cx.timer.every(5000, (cx) => { this.refreshBranch(cx); this.refreshSleep(cx); });
     this.refreshBranch(cx);
+    this.refreshSleep(cx);
+  }
+
+  // agent-sleep's record of this pane's terminal (sleeping.json), for the ☾.
+  refreshSleep(cx) {
+    const addr = this.me()?.terminal;
+    if (!addr) return;
+    cx.spawn(async (cx) => {
+      let rec = null;
+      try { rec = JSON.parse(await readTextFile(`${home()}/.config/herdr-app/agent-sleep/sleeping.json`))?.records?.[addr] ?? null; } catch {}
+      const next = rec ? { state: rec.state, held: rec.held === true } : null;
+      if (JSON.stringify(next) !== JSON.stringify(this.sleepRec)) { this.sleepRec = next; cx.notify(); }
+    });
+  }
+
+  // The ☾: on a Claude pane, on hover, puts that one agent to sleep (agent-sleep's
+  // sleep-terminal); one asleep from its ☾ shows it lit, and a click wakes it.
+  moon(t, p) {
+    const addr = p.terminal;
+    const rec = this.sleepRec;
+    const held = rec?.held === true && (rec.state === "asleep" || rec.state === "stopping");
+    const claude = p.app === "claude-code" || p.program?.agent === true;
+    if (!addr || (!held && !(claude && this.hovered && p.status !== "working" && p.status !== "blocked"))) return null;
+    return div()
+      .id(`ph-sleep-${p.pane}`)
+      .flex_none()
+      .p(3)
+      .rounded(4)
+      .text_color(held ? t.accent : t.dim)
+      .hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .tooltip(held ? (rec.state === "stopping" ? "Going to sleep\u2026" : "Asleep: click to wake it") : "Sleep this agent (it stays asleep until you click \u263e again)")
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        run(`agent-sleep.${held ? "wake" : "sleep"}-terminal.${addr}`);
+        this.sleepRec = held ? null : { state: "stopping", held: true };
+        cx.notify();
+      })
+      .child(svg("mods/agent-sleep/icons/moon.svg").size(12));
   }
 
   // panes()[i].branch can be empty for terminals; read it from git in the pane's live folder.
@@ -137,6 +176,7 @@ export default class Pane extends View {
         .tooltip("Main checkout, but not on main: switch it back before updating").child("\u26a0")))
       .when(!wt && Boolean(p.cwd), el => el.child(div().flex_none().max_w(280).truncate().text_color(t.dim).child(folder(p.cwd))))
       .child(div().flex_1())
+      .when(Boolean(this.moon(t, p)), el => el.child(this.moon(t, p)))
       .when(st === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))
       .when(st === "blocked", el => el.child(div().flex_none().px(6).h(18).flex().items_center().rounded(5).bg(withAlpha(t.blocked, "26")).text_size(10.5).font_semibold().text_color(t.blocked).child("Needs you")))
       .when(st === "done", el => el.child(div().size(7).flex_none().rounded(4).bg(t.done)))
