@@ -61,7 +61,7 @@
               },
               "min": 90,
               "content": {
-                "mod": "agents"
+                "mod": "agents-ws"
               }
             }
           ]
@@ -169,16 +169,36 @@
         },
         {
           "id": "status",
-          "type": "block",
+          "type": "row",
+          "resizable": false,
           "size": {
             "px": 28
           },
-          "content": {
-            "mod": "claude-accounts",
-            "props": {
-              "view": "status"
+          "children": [
+            {
+              "id": "status-accounts",
+              "type": "block",
+              "size": {
+                "weight": 1
+              },
+              "content": {
+                "mod": "claude-accounts",
+                "props": {
+                  "view": "status"
+                }
+              }
+            },
+            {
+              "id": "status-agent-sleep",
+              "type": "block",
+              "size": {
+                "px": 40
+              },
+              "content": {
+                "mod": "agent-sleep"
+              }
             }
-          }
+          ]
         }
       ]
     }
