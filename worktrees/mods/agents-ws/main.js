@@ -8,7 +8,7 @@
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, hc, exec, theme, settings, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
-import { isProcess, procName, procState, track, withEnded, tree as procTree, quietAgents, bySpace, orphans, projectOf, isLiveMain } from "./model.js";
+import { isProcess, procName, procState, track, withEnded, tree as procTree, quietAgents, bySpace, orphans, projectOf, isLiveMain, procCommand } from "./model.js";
 
 // The main orchestrator's star, the same soft gold as the pane header's.
 const GOLD = "#c9a75a";
@@ -217,6 +217,23 @@ export default class Agents extends View {
   // Stamps processes and looks up, once, the final state of ones that left the list.
   trackProcs(all, now, cx) {
     const { dirty, vanished } = track(this.procs, all, now);
+    // The command each process runs, read once: it never changes.
+    // A failed read is tried again after 30 s; commands of processes gone are dropped.
+    this.cmds ??= {};
+    this.cmdTried ??= {};
+    const shown = new Set(all.filter(isProcess).map((k) => k.address));
+    for (const a of Object.keys(this.cmds)) if (!shown.has(a)) { delete this.cmds[a]; delete this.cmdTried[a]; }
+    for (const a of shown) {
+      if (this.cmds[a] || now - (this.cmdTried[a] ?? 0) < 30000) continue;
+      this.cmdTried[a] = now;
+      cx.spawn(async (cx) => {
+        try {
+          const r = await hc(["get", a, "--json"]);
+          const cmd = r.code === 0 ? procCommand(JSON.parse(r.stdout).argv) : "";
+          if (cmd) { this.cmds[a] = cmd; cx.notify(); }
+        } catch {}
+      });
+    }
     if (dirty) localStorage.setItem(PROCS_KEY, JSON.stringify(this.procs));
     for (const address of vanished) {
       cx.spawn(async (cx) => {
@@ -254,7 +271,7 @@ export default class Agents extends View {
       .cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .on_click(() => this.openOutput(k, state))
-      .tooltip(`${procName(k)} · ${k.address}`)
+      .tooltip([`${procName(k)} · ${k.address}`, this.cmds?.[k.address] && `$ ${this.cmds[k.address]}`, k.cwd].filter(Boolean).join("\n"))
       .children(s.lines.map(l => div().self_start().mt(-4).w(9).h(16).mr(4).flex_none()
         .when(Boolean(l), el => el.border_l(1.5).border_color(t.input))
         .when(l === "└" || l === "├", el => el.border_b(1.5).rounded_bl(6))))
@@ -267,6 +284,13 @@ export default class Agents extends View {
   initOutput(cx) {
     this.procs = loadJSON(PROCS_KEY, {});
     this.text = "";
+    this.cmd = "";
+    cx.spawn(async (cx) => {
+      try {
+        const r = await hc(["get", props().output, "--json"]);
+        if (r.code === 0) { this.cmd = procCommand(JSON.parse(r.stdout).argv); cx.notify(); }
+      } catch {}
+    });
     const read = (cx) => cx.spawn(async (cx) => {
       try {
         const r = await hc(["read", props().output, "--lines", "40"]);
@@ -313,6 +337,16 @@ export default class Agents extends View {
           .tooltip("Close (Esc)")
           .on_click(() => closeOverlay(p.overlay))
           .child("×")))
+      .when(Boolean(this.cmd), (el) => el.child(div()
+        .px(10)
+        .py(6)
+        .flex_none()
+        .border_b(1)
+        .border_color(t.border)
+        .font_family(mono)
+        .text_size(11)
+        .text_color(t.dim)
+        .child(`$ ${this.cmd}`)))
       .child(div()
         .id("output-text")
         .flex_1()

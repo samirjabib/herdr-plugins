@@ -173,3 +173,19 @@ test("the main orchestrator is the one in a project's main checkout on main", as
   assert.equal(isLiveMain("/u/mac-workspace/ag/shop/worktrees/x", "main"), false);
   assert.equal(isLiveMain(null, "main"), false);
 });
+
+test("a process row shows the command it runs: a shell wrapper and output redirections dropped", async () => {
+  const { procCommand } = await import("../worktrees/mods/agents-ws/model.js");
+  assert.equal(procCommand(["sh", "-c", "npx tsx scripts/bench.ts --runs 1 > /tmp/x/db.log 2>&1"]), "npx tsx scripts/bench.ts --runs 1");
+  assert.equal(procCommand(["bash", "-lc", "npm test  >>out.txt"]), "npm test");
+  assert.equal(procCommand(["npm", "run", "dev"]), "npm run dev");
+  assert.equal(procCommand(["zsh", "-c", "a 2>/dev/null && b"]), "a && b");
+  assert.equal(procCommand(null), "");
+  assert.equal(procCommand([]), "");
+});
+
+test("a '>' inside quotes is part of the command, not a redirection", async () => {
+  const { procCommand } = await import("../worktrees/mods/agents-ws/model.js");
+  assert.equal(procCommand(["sh", "-c", `node -e "a.map(x => x)" > out.log`]), `node -e "a.map(x => x)"`);
+  assert.equal(procCommand(["sh", "-c", "echo 'a > b' 2>&1"]), "echo 'a > b'");
+});

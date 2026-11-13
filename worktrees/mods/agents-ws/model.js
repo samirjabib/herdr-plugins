@@ -140,3 +140,13 @@ export function projectOf(dir) {
 export function isLiveMain(cwd, branch) {
   return /\/mac-workspace\/[^/]+\/[^/]+\/main(?:\/|$)/.test(cwd ?? "") && (branch === "main" || branch === "master");
 }
+
+// The command a process runs, as you'd type it: a `sh -c` wrapper unwrapped and
+// output redirections (`> file`, `2>&1`, `2>/dev/null`) dropped.
+export function procCommand(argv) {
+  if (!argv?.length) return "";
+  const shell = /^(sh|bash|zsh|dash)$/.test(String(argv[0]).split("/").pop());
+  const line = shell && /^-[a-z]*c$/.test(argv[1] ?? "") ? String(argv[2] ?? "") : argv.join(" ");
+  // Quoted text is kept as is: a '>' inside quotes is an argument, not a redirection.
+  return line.replace(/("[^"]*"|'[^']*')|\s*\d*>>?\s*(&\d|\S+)/g, (_m, quoted) => quoted ?? "").replace(/\s+/g, " ").trim();
+}
