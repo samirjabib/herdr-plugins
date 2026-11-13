@@ -84,10 +84,18 @@ project's main up to date.
   space freed.
 - **Buttons.** The switcher has "+ New worktree" and "Clean up…"; the create,
   remove and clean up dialogs have Cancel and their action. The keys still work.
+- **Agents list** (`agents-ws`, a copy of Herdr's `agents`). Agents look and
+  sort as before. Background processes an agent started with `hc run`
+  (watchers, jobs, dev servers) sit under it, at any depth, with a ▸ and
+  `running`, `✓ <age>` or `exit <code>`. Click one to read its last 40 lines in
+  a popup, no new tab (× or Esc closes it). Finished ones leave after 5
+  minutes; failed ones stay until you have opened them once. Plain shells in
+  tabs are not processes.
 - **The layout** (`main-accounts`): Herdr's default with claude-accounts' usage
-  in the status bar, the sidebar's spaces from `spaces-ws` and pane headers from
-  `pane-branch`, and the Files and Changes panels from `files-ws` and `changes-ws`.
+  in the status bar, the sidebar's spaces from `spaces-ws`, the Agents list from
+  `agents-ws`, pane headers from `pane-branch`, and the Files and Changes panels
+  from `files-ws` and `changes-ws`.
 
-**Updates.** The six mods are copies of Herdr's shipped ones, so they don't
+**Updates.** The seven mods are copies of Herdr's shipped ones, so they don't
 follow Herdr's updates. If Herdr's own spaces list or pane header gains
 something, clone it again and reapply this plugin's changes.
