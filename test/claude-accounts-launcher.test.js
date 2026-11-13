@@ -142,3 +142,19 @@ test("outside a mac-workspace checkout, or outside Herdr, no name is added", asy
   assert.equal(named(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, s.home)), null);
   assert.equal(named(run(s, {}, [], undefined, cwd)), null);
 });
+
+test("subcommands, --version and --help get no name: only sessions are named", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/a/home\n" });
+  const cwd = await workspace(s, "ag/shop-app/main");
+  for (const args of [["mcp", "list"], ["update"], ["doctor"], ["--version"], ["-v"], ["--help"], ["-h"]]) {
+    const r = run(s, { HC_TERMINAL_ID: "t1" }, args, undefined, cwd);
+    assert.deepEqual(r.out.split("\n").filter((l) => l.startsWith("arg=")).map((l) => l.slice(4)), args);
+  }
+  assert.equal(named(run(s, { HC_TERMINAL_ID: "t1" }, ["fix the login bug"], undefined, cwd)), "mini · shop-app · main · dev");
+});
+
+test("a backslash in a folder name is kept as is", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/a/home\n" });
+  const cwd = await workspace(s, "ag/a\\nb/main");
+  assert.equal(named(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, cwd)), "mini · a\\nb · main · dev");
+});

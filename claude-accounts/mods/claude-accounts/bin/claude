@@ -55,7 +55,8 @@ session_name() {
   [ -n "$id" ] || id=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
   id=$(printf %s "$id" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
   mac=$(awk -F'\t' -v id="$id" '$2 == id { print $1; exit }' "$HOME/mac-workspace/hosts/aliases.tsv" 2>/dev/null)
-  name="${mac:-$id} \302\267 $project \302\267 $tree"
+  dot=$(printf '\302\267')
+  name="${mac:-$id} $dot $project $dot $tree"
   accounts="$HOME/.config/herdr-app/claude-accounts/accounts.json"
   if [ -n "${CLAUDE_CONFIG_DIR:-}" ] && [ -r "$accounts" ]; then
     i=0
@@ -65,19 +66,24 @@ session_name() {
         case $who in
           ""|*"'s Organization") who=$(plutil -extract "$i.email" raw -o - "$accounts" 2>/dev/null); who=${who%%@*} ;;
         esac
-        [ -n "$who" ] && name="$name \302\267 $who"
+        [ -n "$who" ] && name="$name $dot $who"
         break
       fi
       i=$((i + 1))
     done
   fi
-  printf '%b' "$name"
+  printf '%s' "$name"
 }
 
 if [ -n "${HC_TERMINAL_ID:-}" ]; then
   want=1
+  # Only sessions get a name: not subcommands (`claude mcp list`, `claude update`)
+  # nor --version / --help.
+  case ${1-} in
+    agents|attach|auth|auto-mode|config|doctor|gateway|import|install|kill|logs|mcp|migrate-installer|plugin|plugins|purge|respawn|rm|sessions|setup-token|stop|ultrareview|update|upgrade) want=0 ;;
+  esac
   for a in "$@"; do
-    case $a in -n|--name|--name=*|-p|--print) want=0 ;; esac
+    case $a in -n|--name|--name=*|-p|--print|-v|--version|-h|--help) want=0 ;; esac
   done
   if [ "$want" = 1 ] && name=$(session_name) && [ -n "$name" ]; then
     set -- --name "$name" "$@"
