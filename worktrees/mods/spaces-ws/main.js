@@ -604,7 +604,9 @@ export default class Spaces extends View {
           })
           .child("Spaces")))
         .child(div().id("space-new").size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
-          .on_click(() => run("space.new")).child(svg("mods/workspace-chrome/plus.svg").size(14))))
+          // The project picker, on the organization shown (ALL starts on AG).
+          .on_click(() => openOverlay({ mod: "space-picker", kind: "dialog", width: 520, height: 460, props: { org: this.org === "all" ? "ag" : this.org } }))
+          .child(svg("mods/workspace-chrome/plus.svg").size(14))))
       .when(!collapsed && this.tabsShown, (el) => el.child(this.orgTabs(t)))
       .child(v_flex().flex_1().min_h(0).px(collapsed ? 0 : 8).pb(14).overflow_y_scrollbar().mode("always")
         .on_mouse_up("left", (_e, cx) => { this.pressed = null; cx.notify(); })
