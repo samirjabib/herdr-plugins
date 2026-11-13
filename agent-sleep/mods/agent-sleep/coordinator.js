@@ -56,7 +56,7 @@ import {
 } from "./store.js";
 import { BADGE_KEY, ASLEEP_KEY, badgeValue, asleepValue, sameValue, workspaceOf, parseWorktreeList } from "./badges.js";
 import {
-  loadSession, loadConfigDirs, loadWakeAccount, isClaudeName, parseExitScreen, exitSessionId, sessionFilePath,
+  loadSession, loadConfigDirs, loadWakeAccount, isClaudeName, withClaudeName, parseExitScreen, exitSessionId, sessionFilePath,
 } from "./claude-session.js";
 import { readPrompt, classifyProbe, promptRestored, PROBE_KEY, ERASE_KEY } from "./prompt.js";
 import { resumeFlags, resumeCommand, canResumeIn, hintDifference, REPLAYABLE_ENV } from "./resume.js";
@@ -1509,7 +1509,7 @@ export class Coordinator {
   // Core's terminals. `only`: complete just these addresses (a settle);
   // otherwise every local Claude Code terminal and every one with a record.
   async gather({ only } = {}) {
-    const raw = this.safe(() => list(this.d.live.terminals()), []).filter((t) => isObject(t) && isAddress(t.address));
+    const raw = this.safe(() => list(this.d.live.terminals()), []).filter((t) => isObject(t) && isAddress(t.address)).map(withClaudeName);
     const lacking = raw.filter((t) => !hasCoreFields(t)).length;
     let fetched = 0;
     const out = [];
@@ -1523,7 +1523,7 @@ export class Coordinator {
       }
       const full = await this.getTerminal(t.address);
       if (full) fetched += 1;
-      out.push(full ? { ...t, ...full } : t);
+      out.push(full ? withClaudeName({ ...t, ...full }) : t);
     }
     if (!only && raw.length > 0) {
       this.fields = lacking === 0
@@ -1612,7 +1612,7 @@ export class Coordinator {
     if (r.code !== 0) return null;
     try {
       const t = JSON.parse(r.stdout);
-      return isObject(t) && t.address === address ? t : null;
+      return isObject(t) && t.address === address ? withClaudeName(t) : null;
     } catch {
       return null;
     }
