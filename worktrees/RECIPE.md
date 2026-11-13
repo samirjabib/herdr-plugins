@@ -30,6 +30,17 @@ go to sleep and come back where they were.
   space is named after comes first, its main checkout before its worktrees.
   Entering a space focuses its pane in main. `☾` marks a space whose agents
   are asleep.
+  Tabs above the list pick the organization: ALL, then AG, CS, PERSONAL (the
+  mac-workspace group a space's folder is in) and OTHER, each with its count
+  and a dot in the needs-you color when an agent there needs you. Jumping to a
+  space of another organization switches the tab; clicking "Spaces" hides the
+  bar and lists every space.
+- **The `+`** (`space-picker`): the same organization tabs, a search, and the
+  organization's projects with their worktrees (↑/↓, Enter, Tab for the next
+  organization, Esc). A project that has a space goes there, else a space opens
+  on its main with Claude; a worktree opens as a tab in its project's space; a
+  catalogued project not cloned here says to run `ws clone`; "Other folder…"
+  opens the system's folder picker.
 - **Files and Changes panels** (`files-ws`, `changes-ws`, copies of Herdr's).
   They already follow the focused pane's checkout; a row under the title now
   says which: the same `<project> › <worktree>` chip (hover: the path) and its
