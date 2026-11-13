@@ -187,6 +187,14 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
 - **Which account a terminal runs.** Inside Herdr, the `claude` launcher
   starts each new Claude on the active account. A running terminal's
   account is the config folder holding its live session file.
+- **Session names.** In a mac-workspace checkout (`~/mac-workspace/<group>/<project>/main`
+  or `.../worktrees/<worktree>`), the launcher names the session
+  `<Mac> · <project> · <worktree or main> · <account>`, e.g.
+  `mini · shop-app · pre-order · Work Org` (Mac: its alias in
+  `hosts/aliases.tsv`; account: its org, or its email's name for a personal org).
+  The name shows in the prompt box, `/resume` and Remote Control on the phone,
+  and a switch's restart renames it after the new account. A name given by hand
+  (`-n`/`--name`) or a print run (`-p`) is left alone.
 - **Switching while Claude runs.**
   - Always restart: every Claude terminal on the previous account restarts
     on the new one, continuing its conversation. Ask: the switch dialog
@@ -258,8 +266,15 @@ scripts/install.sh claude-accounts
 - The footer lives in the projects layout's status row
   (`projects-sidebar/layouts/projects.json`), so install `projects-sidebar`
   too and switch to the `projects` layout.
-- New terminals follow the active account only through the `claude`
-  launcher (a wrapper script on the PATH), which reads the `active` file.
+- New terminals and a switch's restarts follow the account only through the
+  `claude` launcher, `mods/claude-accounts/bin/claude`. Put its installed
+  folder first on the PATH inside Herdr, for example in `~/.zshrc`:
+  `[ -n "$HC_TERMINAL_ID" ] && PATH="$HOME/.config/herdr-app/mods/claude-accounts/bin:$PATH"`.
+  It uses `CLAUDE_ACCOUNTS_DIR` when set (even empty), else the first line of
+  `active`, sets or unsets `CLAUDE_CONFIG_DIR`, and runs the next `claude` on
+  the PATH. Outside Herdr it changes nothing. It is not linked into
+  `~/.local/bin`: that `claude` is Claude Code's own. Without it every
+  restart ends as "landed elsewhere" and new Claudes stay on System default.
 - Live numbers between polls need the statusline drop in
   `~/.claude/statusline.sh`.
 - Node 22.15 or newer on the PATH Herdr's `exec` sees.

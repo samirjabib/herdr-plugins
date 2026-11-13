@@ -1,0 +1,112 @@
+#!/bin/sh
+# The `claude` launcher of claude-accounts. Put this folder first on the PATH;
+# the shell then runs this instead of Claude Code, and this runs Claude Code.
+#
+# Inside Herdr ($HC_TERMINAL_ID set) it picks the account's config folder:
+#   1. CLAUDE_ACCOUNTS_DIR when set, even empty: the line a switch's restart
+#      types (`CLAUDE_ACCOUNTS_DIR=<folder> claude ... --resume <id>`);
+#   2. else the first line of ~/.config/herdr-app/claude-accounts/active;
+#   3. else (no active file) the environment as it is.
+# An empty folder means System default: CLAUDE_CONFIG_DIR is unset.
+# Outside Herdr it changes nothing. Then it runs the next `claude` on the
+# PATH that is not this script, with the same arguments.
+
+if [ -n "${HC_TERMINAL_ID:-}" ]; then
+  active="$HOME/.config/herdr-app/claude-accounts/active"
+  pick=0
+  if [ "${CLAUDE_ACCOUNTS_DIR+set}" = set ]; then
+    dir=$CLAUDE_ACCOUNTS_DIR
+    pick=1
+  elif [ -r "$active" ]; then
+    IFS= read -r dir < "$active" || [ -n "$dir" ] || dir=
+    pick=1
+  fi
+  if [ "$pick" = 1 ]; then
+    if [ -n "$dir" ]; then
+      CLAUDE_CONFIG_DIR=$dir
+      export CLAUDE_CONFIG_DIR
+    else
+      unset CLAUDE_CONFIG_DIR
+    fi
+  fi
+fi
+unset CLAUDE_ACCOUNTS_DIR
+
+# Inside Herdr, in a mac-workspace checkout, the session gets a name that tells
+# sessions apart at a glance (prompt box, /resume, Remote Control on the phone):
+#   <Mac> · <project> · <worktree, or main> · <account>
+# Not when a name is given by hand or for a print run.
+session_name() {
+  ws=$(cd "$HOME/mac-workspace" 2>/dev/null && pwd -P) || return 1
+  here=$(pwd -P 2>/dev/null) || return 1
+  case $here/ in "$ws"/*) ;; *) return 1 ;; esac
+  rel=${here#"$ws"/}
+  rest=${rel#*/}
+  project=${rest%%/*}
+  [ "$project" != "$rest" ] || return 1
+  rest=${rest#*/}
+  case $rest/ in
+    main/*) tree=main ;;
+    worktrees/*/*) tree=${rest#worktrees/}; tree=${tree%%/*} ;;
+    *) return 1 ;;
+  esac
+  id=
+  [ -r "$HOME/.config/mac-workspace/host" ] && IFS= read -r id < "$HOME/.config/mac-workspace/host"
+  [ -n "$id" ] || id=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
+  id=$(printf %s "$id" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+  mac=$(awk -F'\t' -v id="$id" '$2 == id { print $1; exit }' "$HOME/mac-workspace/hosts/aliases.tsv" 2>/dev/null)
+  dot=$(printf '\302\267')
+  name="${mac:-$id} $dot $project $dot $tree"
+  accounts="$HOME/.config/herdr-app/claude-accounts/accounts.json"
+  if [ -n "${CLAUDE_CONFIG_DIR:-}" ] && [ -r "$accounts" ]; then
+    i=0
+    while dir=$(plutil -extract "$i.configDir" raw -o - "$accounts" 2>/dev/null); do
+      if [ "$dir" = "$CLAUDE_CONFIG_DIR" ]; then
+        who=$(plutil -extract "$i.org" raw -o - "$accounts" 2>/dev/null)
+        case $who in
+          ""|*"'s Organization") who=$(plutil -extract "$i.email" raw -o - "$accounts" 2>/dev/null); who=${who%%@*} ;;
+        esac
+        [ -n "$who" ] && name="$name $dot $who"
+        break
+      fi
+      i=$((i + 1))
+    done
+  fi
+  printf '%s' "$name"
+}
+
+if [ -n "${HC_TERMINAL_ID:-}" ]; then
+  want=1
+  # Only sessions get a name: not subcommands (`claude mcp list`, `claude update`)
+  # nor --version / --help.
+  case ${1-} in
+    agents|attach|auth|auto-mode|config|doctor|gateway|import|install|kill|logs|mcp|migrate-installer|plugin|plugins|purge|respawn|rm|sessions|setup-token|stop|ultrareview|update|upgrade) want=0 ;;
+  esac
+  for a in "$@"; do
+    case $a in -n|--name|--name=*|-p|--print|-v|--version|-h|--help) want=0 ;; esac
+  done
+  if [ "$want" = 1 ] && name=$(session_name) && [ -n "$name" ]; then
+    set -- --name "$name" "$@"
+  fi
+fi
+
+self=$0
+case $self in
+  */*) ;;
+  *) self=$(command -v -- "$0") ;;
+esac
+
+old_ifs=$IFS
+IFS=:
+for d in $PATH; do
+  [ -n "$d" ] || d=.
+  candidate="$d/claude"
+  if [ -f "$candidate" ] && [ -x "$candidate" ] && ! [ "$candidate" -ef "$self" ]; then
+    IFS=$old_ifs
+    exec "$candidate" "$@"
+  fi
+done
+IFS=$old_ifs
+
+echo "claude-accounts launcher: no claude found on the PATH besides this script ($self)" >&2
+exit 127
