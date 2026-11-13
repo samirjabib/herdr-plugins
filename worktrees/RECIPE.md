@@ -90,7 +90,16 @@ project's main up to date.
   `running`, `✓ <age>` or `exit <code>`. Click one to read its last 40 lines in
   a popup, no new tab (× or Esc closes it). Finished ones leave after 5
   minutes; failed ones stay until you have opened them once. Plain shells in
-  tabs are not processes.
+  tabs are not processes, and neither is a command with its own pane: that one
+  gets a normal row (click focuses its pane, its own sub-terminals fold under it).
+- **`herdr-grid`** (on PATH as `~/.local/bin/herdr-grid`). `herdr-grid place
+  <terminal>` gives an `hc run` worker a pane in the orchestrator's tab: the
+  orchestrator keeps the left column at full height, workers fill columns to its
+  right two stacked per column, an odd last one full height (`O | w1/w2 | w3`).
+  Herdr only halves a pane, so each placement re-lays the whole grid (column tops
+  first, then the ones under them); focus jumps there and comes back.
+  `herdr-grid merge <from space> <into space>` moves every tab of a duplicate
+  space into the project's space and closes the empty one; no terminal ends.
 - **The layout** (`main-accounts`): Herdr's default with claude-accounts' usage
   in the status bar, the sidebar's spaces from `spaces-ws`, the Agents list from
   `agents-ws`, pane headers from `pane-branch`, and the Files and Changes panels

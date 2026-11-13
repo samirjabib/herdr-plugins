@@ -1,0 +1,4 @@
+# Commands scripts/install.sh puts on PATH: each line an executable of this
+# plugin's mods, linked as ~/.local/bin/<its name> to the installed copy, so
+# orchestrators run `herdr-grid place <terminal>` by name.
+mods/spaces-ws/bin/herdr-grid

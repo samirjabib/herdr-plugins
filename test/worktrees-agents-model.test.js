@@ -122,3 +122,8 @@ test("a hidden process hides what it launched", () => {
   const all = [agent("t1"), job("t3", "t1", { state: "finished", exit_code: 0, finished_ms: NOW - FADE_MS - 1 }), job("t4", "t3")];
   assert.deepEqual(tree(all, "t1", {}, NOW), []);
 });
+
+test("a command with its own pane is a terminal row, not a background process", () => {
+  assert.equal(isProcess(job("t2", "t1", { paned: true })), false);
+  assert.equal(isProcess(job("t2", "t1")), true, "the same job without a pane stays a process");
+});

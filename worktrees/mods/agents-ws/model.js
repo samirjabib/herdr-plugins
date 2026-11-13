@@ -20,8 +20,10 @@ const bareShell = (t) => Boolean(t.program?.shell) && (t.argv ?? []).slice(1).ev
 
 // Launched by another terminal, not an agent (no status, not an agent program),
 // and running a command rather than an interactive shell.
+// One with its own pane (`paned`, set by the mod from panes()) is a terminal you
+// look at, so it gets a normal row: select it, fold its own sub-terminals.
 export function isProcess(t) {
-  if (!t?.parent) return false;
+  if (!t?.parent || t.paned) return false;
   if (t.program?.agent || t.status) return false;
   return !bareShell(t);
 }

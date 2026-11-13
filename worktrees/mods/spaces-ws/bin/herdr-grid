@@ -1,0 +1,125 @@
+#!/bin/sh
+# herdr-grid: lay an orchestrator's workers out in its own tab, in pairs.
+#
+#   herdr-grid place <terminal> [--anchor <terminal>]   add <terminal> to the anchor's grid
+#   herdr-grid plan <n>                                  print the steps for n workers (no Herdr calls)
+#
+# The anchor (default: $HC_TERMINAL_ID, the orchestrator) keeps the left
+# column at full height. Workers fill columns to its right, two stacked per
+# column; an odd last worker keeps its column's full height:
+#
+#   1 worker: O | w1      2: O | w1/w2      3: O | w1/w2 | w3      4: O | w1/w2 | w3/w4
+#
+# Herdr only splits one pane in half, so a column can only be opened while the
+# pane beside it is still full height. Each placement therefore takes every
+# worker of the grid out of its pane (terminal.park: it keeps running) and
+# gives them panes again: first the top of each column, left to right, then
+# the worker under each. Placed workers carry the labels herdr.grid=<anchor>
+# and herdr.grid.i=<n>. Focus returns to the pane that had it.
+set -eu
+
+die() { echo "herdr-grid: $*" >&2; exit 1; }
+
+# plan <n>: one line per step, "<worker> <target> <right|down>", target 0 = the anchor.
+plan() {
+  n=$1
+  case $n in ''|*[!0-9]*|0) die "worker count must be 1 or more, got '$n'" ;; esac
+  prev=0 i=1
+  while [ $i -le "$n" ]; do echo "$i $prev right"; prev=$i; i=$((i + 2)); done
+  i=2
+  while [ $i -le "$n" ]; do echo "$i $((i - 1)) down"; i=$((i + 2)); done
+}
+
+app() { out=$(herdr-app do "$@" 2>&1) || die "herdr-app do $1: $(printf '%s' "$out" | jq -r '.error? // .' 2>/dev/null || printf '%s' "$out")"; }
+
+# address <name|address>: Herdr's commands take addresses (t7f), not hc names.
+address() { hc get "$1" --json 2>/dev/null | jq -r '.address // empty'; }
+
+shown() { herdr-app ls | jq -e --arg t "$1" 'any(.spaces[].tabs[].terminals[]; .terminal == $t)' >/dev/null; }
+
+# settle <terminal> <shown|hidden>: park and keep reply "pending" and apply a moment
+# later; wait (up to 5 s) until the window shows the change before the next step.
+settle() {
+  k=0
+  while [ $k -lt 50 ]; do
+    if shown "$1"; then [ "$2" = shown ] && return 0; else [ "$2" = hidden ] && return 0; fi
+    sleep 0.1; k=$((k + 1))
+  done
+  die "$1 is still not $2 after 5 s"
+}
+
+place() {
+  [ -n "$2" ] || die "no anchor: run inside Herdr or pass --anchor <terminal>"
+  t=$(address "$1"); [ -n "$t" ] || die "no terminal $1"
+  anchor=$(address "$2"); [ -n "$anchor" ] || die "no terminal $2"
+  [ "$t" != "$anchor" ] || die "a terminal can't be placed beside itself"
+
+  # The grid's live workers in their order, then the new one.
+  workers=$( { hc ls 2>/dev/null | jq -r '.terminals[].address' | while read -r a; do
+      hc get "$a" --json 2>/dev/null | jq -r --arg an "$anchor" --arg t "$t" \
+        'select(.state == "live" and .labels["herdr.grid"] == $an and .address != $t) | "\(.labels["herdr.grid.i"]) \(.address)"'
+    done | sort -n | awk '{ print $2 }'; echo "$t"; } )
+  n=$(printf '%s\n' "$workers" | grep -c .)
+
+  back=$(herdr-app status | jq -r '.focused_pane // empty')
+  for w in $workers; do if shown "$w"; then app terminal.park --terminal "$w"; settle "$w" hidden; fi; done
+  plan "$n" | while read -r i target dir; do
+    w=$(printf '%s\n' "$workers" | sed -n "${i}p")
+    if [ "$target" -eq 0 ]; then to=$anchor; else to=$(printf '%s\n' "$workers" | sed -n "${target}p"); fi
+    app pane.focus --terminal "$to"
+    app terminal.keep --terminal "$w" --place "$dir"
+    settle "$w" shown
+    hc label "$w" "herdr.grid=$anchor" >/dev/null
+    hc label "$w" "herdr.grid.i=$i" >/dev/null
+  done
+  [ -z "$back" ] || app pane.focus --pane "$back" || true
+  echo "$t: worker $n of $anchor's grid"
+}
+
+# merge <from space> <into space>: every tab of <from> becomes a tab of <into>, its
+# first terminal first, the rest laid out again as that terminal's grid. <from> is
+# closed only once it holds no terminal (closing a space ends what is left in it).
+merge() {
+  from=$1 into=$2
+  [ "$from" != "$into" ] || die "a space can't be merged into itself"
+  herdr-app ls | jq -e --arg s "$into" 'any(.spaces[]; .id == $s)' >/dev/null || die "no space $into"
+  tabs=$(herdr-app ls | jq -r --arg s "$from" '.spaces[] | select(.id == $s) | .tabs[] | [.terminals[].terminal] | join(" ")')
+  [ -n "$tabs" ] || die "no space $from, or it has no terminals"
+  dest=$(herdr-app ls | jq -r --arg s "$into" '[.spaces[] | select(.id == $s) | .tabs[].terminals[].terminal][0] // empty')
+  [ -n "$dest" ] || die "space $into has no terminal to open tabs beside"
+  back=$(herdr-app status | jq -r '.focused_pane // empty')
+  printf '%s\n' "$tabs" | while read -r first rest; do
+    app terminal.park --terminal "$first"; settle "$first" hidden
+    app pane.focus --terminal "$dest"
+    app terminal.keep --terminal "$first" --place tab
+    settle "$first" shown
+    for w in $rest; do place "$w" "$first" >/dev/null; done
+    echo "moved tab: $first${rest:+ $rest}"
+  done
+  # Herdr closes a space once its last tab leaves; close it here only if it stayed, empty.
+  if herdr-app ls | jq -e --arg s "$from" 'any(.spaces[]; .id == $s)' >/dev/null; then
+    left=$(herdr-app ls | jq -r --arg s "$from" '[.spaces[] | select(.id == $s) | .tabs[].terminals[]] | length')
+    if [ "$left" -eq 0 ]; then app space.close --id "$from" --confirmed true; echo "closed $from"
+    else echo "kept $from: $left terminal(s) still in it" >&2
+    fi
+  else echo "closed $from"
+  fi
+  [ -z "$back" ] || app pane.focus --pane "$back" || true
+}
+
+cmd=${1:-}; [ $# -gt 0 ] && shift
+case $cmd in
+  merge) [ $# -eq 2 ] || die "usage: herdr-grid merge <from space> <into space>"; merge "$1" "$2" ;;
+  plan) [ $# -eq 1 ] || die "usage: herdr-grid plan <n>"; plan "$1" ;;
+  place)
+    [ $# -ge 1 ] || die "usage: herdr-grid place <terminal> [--anchor <terminal>]"
+    t=$1; shift; anchor=${HC_TERMINAL_ID:-}
+    while [ $# -gt 0 ]; do
+      case $1 in
+        --anchor) [ $# -ge 2 ] || die "--anchor needs a terminal"; anchor=$2; shift 2 ;;
+        *) die "unknown option $1" ;;
+      esac
+    done
+    place "$t" "$anchor" ;;
+  *) echo "usage: herdr-grid place <terminal> [--anchor <terminal>] | herdr-grid merge <from space> <into space> | herdr-grid plan <n>" >&2; exit 1 ;;
+esac
