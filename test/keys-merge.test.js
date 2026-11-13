@@ -284,3 +284,21 @@ test("uninstall removes what it installed and leaves keys.json alone", () => {
   assert.equal(existsSync(join(home, "layouts/projects.json")), false);
   assert.equal(readFileSync(join(home, "keys.json"), "utf8"), before);
 });
+
+// ── worktrees: ⌘⇧U updates the focused space's project's main ─────────────
+
+const WORKTREE_KEYS = join(repo, "worktrees/keys.json");
+
+test("worktrees keys.json: cmd-shift-u runs spaces-ws.update, only in the main-accounts layout", () => {
+  assert.deepEqual(JSON.parse(readFileSync(WORKTREE_KEYS, "utf8")), { "layout:main-accounts": { "cmd-shift-u": "spaces-ws.update" } });
+});
+
+test("install worktrees: adds cmd-shift-u and keeps every key the person has", () => {
+  const home = fakeHome();
+  const r = install(home, "--alone", "worktrees");
+  assert.equal(r.status, 0, r.stderr);
+  const keys = JSON.parse(readFileSync(join(home, "keys.json"), "utf8"));
+  assert.deepEqual(keys["layout:main-accounts"], { "cmd-shift-u": "spaces-ws.update" });
+  for (const [section, map] of Object.entries(HERDR)) assert.deepEqual(keys[section], map);
+  assert.equal(backups(home).length, 1);
+});

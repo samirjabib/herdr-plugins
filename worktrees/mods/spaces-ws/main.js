@@ -1,11 +1,18 @@
-// Workspace spaces: stable colored avatars, worktrees under their checkout,
-// grouped by machine when more than one is known. After a space's name, the repo
-// its first terminal is in now, only where unusual: branch, ahead/behind. Agent state lives in the agents list, not here. Click to
-// switch, right-click for its menu, drag to reorder.
+// Workspace spaces, one row per project: every space whose first terminal is
+// in the same repo (its main checkout or any worktree) is one row, named after
+// the project, with a stable colored avatar. After the name: a dot per agent
+// in those spaces (working, needs you, idle), ▸N processes they started with
+// hc run (red when one failed), and the state of the repo's main checkout only
+// when it isn't fresh (↓N behind, ⚠ can't fast-forward, why on hover). Rows that
+// need you come first, then working ones. Grouped by machine when more than one
+// is known. Click goes to the project's main checkout space, right-click for its
+// menu (Update main among it), drag to reorder; ⌘⇧U updates the focused
+// project's main with `ws update`.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
+import { spaces, machines, panes, agents, terminals, focused, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout, notify, nextCommand } from "herdr";
+import { mainCheckout, mainState, groupRows, rowActivity, sortRows, rank, dotsShown, rowTooltip, procText, updateArgs, updateToast, contiguousOrder, freshRequest, dropOrder } from "./model.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -25,11 +32,10 @@ function place(s, ps) {
   const tabs = new Set((s.tabs ?? []).map((c) => c.id));
   return ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder;
 }
-const rowHeight = ({ tree }) => (tree ? 28 : 30);
+const ROW_HEIGHT = 30;
 const RAIL_CELL = 32;
 const railCell = (el) => h_flex().flex_none().justify_center().child(el);
 const where = (s, ps) => JSON.stringify([s.machine ?? null, place(s, ps)]);
-const base = (path) => path.replace(/\/+$/, "").split("/").pop();
 // Changes made outside Herdr (an editor's save, a commit in another app): looked
 // for this often, in repos the list shows, while the window is in front.
 const FALLBACK = 60000;
@@ -38,18 +44,15 @@ const FALLBACK = 60000;
 // that draws space avatars): one strong color per hue, light and dark alike.
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
 
-// A space speaks up only when something in it needs you.
-export function glyph(status) {
-  return status === "blocked" || status === "done" ? "●" : "·";
-}
-
-export function tone(t, status) {
-  return t[status] ?? t.unknown;
-}
+// The menu's "Update main" asks through this shared value: { space, at }.
+const UPDATE = "spaces-ws.update";
 
 export default class Spaces extends View {
   init(_props, cx) {
-    this.git = {}; // where() -> { name, branch, ahead, behind, repo, linked }, null: not a repo
+    this.git = {}; // where() -> { repo, path, linked }, null: not a repo
+    this.main = {}; // repo -> its main checkout's state (model.js mainState)
+    this.updating = new Set(); // repos `ws update` runs for now
+    this.handled = shared(UPDATE)?.at ?? null; // the menu's last request, done before this started
     this.checked = {}; // where() -> when it was last looked at
     this.unsure = new Set(); // where()s git couldn't answer for (a machine away)
     this.pending = new Set(); // where()s to look at next
@@ -58,7 +61,7 @@ export default class Spaces extends View {
     this.at = {}; // space -> its where() at the last look
     this.watching = new Set(); // local repos' git folders
     // Spaces made while this runs wait (at most a moment) for their git, so a
-    // worktree appears under its repo instead of jumping there.
+    // worktree joins its project's row instead of showing alone first.
     this.shown = new Set(spaces().map((s) => s.id));
     this.born = {};
     this.pressed = null;
@@ -71,6 +74,34 @@ export default class Spaces extends View {
     cx.timer.every(15000, cx => this.refreshMachines(cx));
     // Refresh only when the refs could have changed (see `due`).
     cx.timer.every(250, (cx) => this.checkNew(cx));
+    // ⌘⇧U (keys.json: "spaces-ws.update"): the focused space's project.
+    cx.spawn(async (cx) => {
+      for (;;) {
+        const c = await nextCommand();
+        if (c === "update") this.update(focused()?.space, cx);
+      }
+    });
+  }
+
+  // Update main: `ws update <project>` on its machine, its one line in a toast,
+  // then the row looks again.
+  update(spaceId, cx) {
+    const row = spaceId && this.rows().find((r) => r.spaces.some((s) => s.id === spaceId));
+    if (!row) return;
+    if (!row.name) {
+      notify({ title: `${row.target.name}: not a git project, no main to update`, level: "warning" });
+      return;
+    }
+    if (this.updating.has(row.repo)) return;
+    this.updating.add(row.repo);
+    cx.notify();
+    cx.spawn(async (cx) => {
+      const r = await exec("sh", updateArgs(row.name), { on: row.target.machine, timeout: 120000 }).catch(() => null);
+      notify(updateToast(row.name, r));
+      this.updating.delete(row.repo);
+      this.refreshGit(Object.keys(this.git).filter((k) => this.git[k]?.repo === row.repo), cx);
+      cx.notify();
+    });
   }
 
   checkNew(cx) {
@@ -79,6 +110,11 @@ export default class Spaces extends View {
     for (const s of sp) if (!this.shown.has(s.id)) this.born[s.id] ??= now;
     const due = this.due(now, sp, panes());
     if (due.size) this.refreshGit(due, cx);
+    const req = shared(UPDATE);
+    if (freshRequest(req, this.handled, now)) {
+      this.handled = req.at;
+      this.update(req.space, cx);
+    }
     if (sp.some((s) => !this.shown.has(s.id)) || this.orderingDue(now)) cx.notify();
   }
 
@@ -116,7 +152,7 @@ export default class Spaces extends View {
     return due;
   }
 
-  // `key` and the other places in its repo (a commit there moves their ahead/behind).
+  // `key` and the other places in its repo (a commit there moves its main's state).
   sameRepo(key, keys) {
     const repo = this.git[key]?.repo;
     return [key, ...(repo ? [...keys].filter((k) => this.git[k]?.repo === repo) : [])];
@@ -186,6 +222,8 @@ export default class Spaces extends View {
         const keys = [...this.pending];
         this.pending.clear();
         await Promise.all(keys.map((key) => this.check(key, cx)));
+        const repos = new Set(keys.map((k) => this.git[k]?.repo).filter(Boolean));
+        await Promise.all([...repos].map((repo) => this.checkMain(repo)));
       }
       const used = new Set(Object.values(this.git).filter(Boolean).map((g) => JSON.parse(g.repo)).filter(([on]) => !on).map(([, repo]) => repo));
       for (const repo of this.watching) if (!used.has(repo)) this.watching.delete(repo);
@@ -194,7 +232,7 @@ export default class Spaces extends View {
     });
   }
 
-  // One place's git: branch, ahead/behind, its repo.
+  // One place's git: its repo and whether it is a worktree of it.
   async check(key, cx) {
     const [on, cwd] = JSON.parse(key);
     this.checked[key] = Date.now();
@@ -214,19 +252,36 @@ export default class Spaces extends View {
       }
       // The repo's own .git folder names it; a worktree's top differs from it.
       const top = r.stdout.replace(/\n$/, ""), repo = common.stdout.replace(/\n$/, "");
-      const [branch, counts] = await Promise.all([
-        exec("git", ["symbolic-ref", "-q", "HEAD"], { cwd, on }),
-        exec("git", ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"], { cwd, on }),
-      ]);
-      const name = repo.endsWith("/.git") ? base(repo.slice(0, -5)) : base(repo).replace(/\.git$/, "");
-      const [ahead, behind] = counts.code === 0 ? counts.stdout.trim().split(/\s+/).map(Number) : [0, 0];
-      const info = { name, branch: branch.code === 0 ? branch.stdout.trim().replace(/^refs\/heads\//, "") : "(detached)", ahead, behind, repo: JSON.stringify([on, repo]), linked: repo !== `${top}/.git` };
-      this.git[key] = info;
+      this.git[key] = { repo: JSON.stringify([on, repo]), path: repo, linked: repo !== `${top}/.git` };
       if (!on) this.watch(repo, cx);
     } catch {
       // Couldn't ask (the machine is away): keep what it showed, look again later.
       this.git[key] ??= null;
       this.unsure.add(key);
+    }
+  }
+
+  // The repo's main checkout: its branch against the default one, tracked
+  // changes, ahead/behind its upstream as last fetched (this never fetches).
+  async checkMain(repo) {
+    const [on, path] = JSON.parse(repo);
+    const cwd = mainCheckout(path);
+    if (!cwd) return;
+    try {
+      const [head, origin, counts, status] = await Promise.all([
+        exec("git", ["symbolic-ref", "-q", "--short", "HEAD"], { cwd, on }),
+        exec("git", ["symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD"], { cwd, on }),
+        exec("git", ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"], { cwd, on }),
+        // No optional locks: it never writes the index, so the repo's watch stays quiet.
+        exec("git", ["--no-optional-locks", "status", "--porcelain", "--untracked-files=no"], { cwd, on }),
+      ]);
+      if (status.code !== 0) { delete this.main[repo]; return; }
+      const branch = head.code === 0 ? head.stdout.trim() : null;
+      const defaultBranch = origin.code === 0 ? origin.stdout.trim().replace(/^origin\//, "") : ["main", "master"].includes(branch) ? branch : "main";
+      const [ahead, behind] = counts.code === 0 ? counts.stdout.trim().split(/\s+/).map(Number) : [0, 0];
+      this.main[repo] = mainState({ branch, defaultBranch, dirty: status.stdout.trim() !== "", ahead, behind });
+    } catch {
+      // The machine is away: keep what it showed.
     }
   }
 
@@ -254,61 +309,72 @@ export default class Spaces extends View {
       && this.ordering.machines.every(name => machines().some(m => m.name === name && m.layout === "ready"));
   }
 
-  // Spaces in order, each worktree space moved under its main checkout's.
+  // One row per project (model.js groupRows), in the spaces' order.
+  rows() {
+    const ps = panes();
+    return groupRows(spaces(), (w) => this.git[where(w, ps)] ?? null);
+  }
+
+  // Simulate the batch so later indexes include earlier moves.
+  move(order, target) {
+    const moved = new Set();
+    const machineOf = new Map(spaces().map((s) => [s.id, s.machine ?? null]));
+    for (let i = 0; i < target.length; i++) {
+      const from = order.indexOf(target[i]);
+      if (from === i || from === -1) continue;
+      run("space.move", { id: target[i], index: i + 1 });
+      moved.add(machineOf.get(target[i]) ?? null);
+      order.splice(i, 0, order.splice(from, 1)[0]);
+    }
+    return [...moved];
+  }
+
+  // The rows shown: each project's spaces kept next to each other (its main
+  // checkout's first), with what runs in them and their main's state.
   ordered() {
     const sp = spaces(), ps = panes();
     const ready = (w) => this.shown.has(w.id) || where(w, ps) in this.git || Date.now() - (this.born[w.id] ??= Date.now()) > 1500;
     for (const w of sp) if (!this.shown.has(w.id) && ready(w)) this.shown.add(w.id);
-    const list = sp.map((w, i) => ({ w, i, g: this.git[where(w, ps)] ?? null }));
-    const mains = new Set(list.filter((r) => r.g && !r.g.linked).map((r) => r.g.repo));
-    const nested = (r) => r.g?.linked && mains.has(r.g.repo);
-    const out = [];
-    const placed = new Set(); // repos whose worktrees are listed (under the first of its spaces)
-    for (const r of list) {
-      if (nested(r)) continue;
-      out.push({ ...r, tree: null });
-      if (!r.g || r.g.linked || placed.has(r.g.repo)) continue;
-      placed.add(r.g.repo);
-      const kids = list.filter((k) => nested(k) && k.g.repo === r.g.repo);
-      kids.forEach((k, n) => out.push({ ...k, tree: n === kids.length - 1 ? "└─" : "├─" }));
-    }
-    // Simulate the batch so later indexes include earlier moves. An attempted
-    // write can lose a sync conflict: allow the echo to settle before retrying.
+    const rows = this.rows();
+    // An attempted write can lose a sync conflict: allow the echo to settle before retrying.
     const order = sp.map(w => w.id);
-    const target = out.map(r => r.w.id);
+    const target = contiguousOrder(rows);
     const key = JSON.stringify([order, target, machines()]);
     if (order.every((id, i) => id === target[i])) {
       this.ordering = null;
     } else if (this.ordering?.key !== key || this.orderingDue(Date.now())) {
-      const moved = new Set();
       this.ordering = { key, at: Date.now(), machines: [] };
-      for (let i = 0; i < out.length; i++) {
-        const from = order.indexOf(out[i].w.id);
-        if (from === i) continue;
-        run("space.move", { id: out[i].w.id, index: i + 1 });
-        moved.add(out[i].w.machine ?? null);
-        order.splice(i, 0, order.splice(from, 1)[0]);
-      }
-      this.ordering.machines = [...moved];
+      this.ordering.machines = this.move(order, target);
     }
-    return out.filter(r => this.shown.has(r.w.id));
+    const world = { agents: agents(), panes: ps, terminals: terminals() };
+    return rows
+      .filter((r) => r.spaces.some((s) => this.shown.has(s.id)))
+      .map((r) => ({ ...r, activity: rowActivity(r.spaces, world), main: r.repo ? this.main[r.repo] ?? { kind: "fresh" } : { kind: "fresh" } }));
+  }
+
+  // Dropping row `from` on row `onto`: all of from's spaces go after it
+  // (dragged down) or before it (dragged up).
+  drop(from, onto) {
+    const order = spaces().map((s) => s.id);
+    this.move(order.slice(), dropOrder(order, from.spaces.map((s) => s.id), onto.spaces.map((s) => s.id)));
   }
 
   // The rows, under a header per machine once one isn't this computer.
   grouped(t, collapsed) {
     const rows = this.ordered();
+    this.shownRows = rows;
     const draw = (r) => (collapsed ? this.compact(r, t) : this.row(r, t));
-    const remote = [...new Set([...rows.map(r => r.w.machine).filter(Boolean), ...this.machines.map(m => m.name), ...Object.keys(this.reconnecting)])].sort();
+    const remote = [...new Set([...rows.map(r => r.target.machine).filter(Boolean), ...this.machines.map(m => m.name), ...Object.keys(this.reconnecting)])].sort();
     const loading = m => {
       const layout = machines().find(k => k.name === m)?.layout;
       return layout === "loading" || (!layout && this.machines.some(k => k.name === m && k.state === "connected"))
         || spaces().some(s => (s.machine ?? null) === m && !this.shown.has(s.id));
     };
     const loadingRow = m => h_flex().id(`machine-loading-${m ?? "local"}`).h(28).flex_none().px(collapsed ? 0 : 8).items_center().when(collapsed, el => el.justify_center()).text_size(12).text_color(t.dim).child(collapsed ? "…" : "Loading…");
-    if (!remote.length) return loading(null) && !rows.length ? [loadingRow(null)] : rows.map(draw);
+    if (!remote.length) return loading(null) && !rows.length ? [loadingRow(null)] : sortRows(rows).map(draw);
     const machineNames = [null, ...remote];
     return machineNames.flatMap((m) => {
-      const mine = rows.filter((r) => (r.w.machine ?? null) === m);
+      const mine = sortRows(rows.filter((r) => (r.target.machine ?? null) === m));
       const repair = this.reconnecting[m];
       const machine = this.machines.find(k => k.name === m) ?? repair?.machine;
       const connected = !m || machine?.state === "connected";
@@ -362,99 +428,112 @@ export default class Spaces extends View {
     });
   }
 
-  // Only what's unusual, after the name: "herdr \u00b7 spike \u21912 \u21931". The repo or
-  // branch goes when the name already says it (a worktree is named after its branch),
-  // and master/main go: nearly every space is on one.
-  gitTail(g, tree, name, t) {
-    const raw = g.branch ?? "detached";
-    const same = (a) => a.toLowerCase() === name.toLowerCase();
-    const branch = same(raw) || raw === "master" || raw === "main" ? "" : raw;
-    const repo = tree || same(g.name) ? "" : g.name;
-    const where = [repo, branch].filter(Boolean).join(" \u00b7 ");
-    return h_flex()
-      .flex_1()
-      .min_w(0)
-      .gap(5)
-      .justify_end()
-      .items_center()
-      .text_size(11.5)
-      .text_color(t.dim)
-      .when(Boolean(where), (el) => el.child(div().min_w(0).truncate().child(where)))
-      .when(g.ahead > 0, (el) => el.child(div().flex_none().text_color(t.ansi2).child(`\u2191${g.ahead}`)))
-      .when(g.behind > 0, (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`)));
+  avatar(r, t, size = 18) {
+    const colors = shared("space.colors") ?? {};
+    const color = colors[r.target.id] ?? "ansi6";
+    const fill = color.startsWith("#") ? color : (MARK[color] ?? t[color]);
+    const name = r.name ?? r.target.name;
+    return h_flex().size(size).flex_none().rounded(5).bg(fill).items_center().justify_center()
+      .text_size(10.5).font_bold().text_color("#ffffff").child([...name][0]?.toUpperCase() ?? "?");
   }
 
-  row({ w, i, g, tree }, t) {
-    const on = w.active;
-    const fromIndex = this.pressed === null ? -1 : spaces().findIndex(s => s.id === this.pressed);
-    const colors = shared("space.colors") ?? {};
-    const color = colors[w.id] ?? "ansi6";
-    const fill = color.startsWith("#") ? color : (MARK[color] ?? t[color]);
+  // One agent's dot: working filled, needs you filled in its color, idle hollow.
+  dot(a, t) {
+    const el = div().size(7).flex_none().rounded(4);
+    if (a.kind === "work") return el.bg(t.working);
+    if (a.kind === "need") return el.bg(t.blocked);
+    return el.border(1.5).border_color(t.idle ?? t.dim);
+  }
+
+  // After the name: the agents' dots, ▸N processes, main's state (only when not fresh).
+  tail(r, t) {
+    const { agents: list, procs } = r.activity;
+    const count = procText(procs);
+    const busy = r.repo && this.updating.has(r.repo);
+    return h_flex().flex_1().min_w(0).gap(6).justify_end().items_center().text_size(11.5).text_color(t.dim)
+      .when(dotsShown(list), (el) => el.child(h_flex().flex_none().gap(4).items_center().children(list.map((a) => this.dot(a, t)))))
+      .when(Boolean(count), (el) => el.child(div().flex_none().text_size(11).text_color(procs.failed ? t.ansi1 : t.dim).child(count)))
+      .when(busy, (el) => el.child(div().flex_none().text_color(t.dim).child("updating…")))
+      .when(!busy && r.main.kind === "behind", (el) => el.child(div().flex_none().text_color(t.ansi3).child(r.main.text)))
+      .when(!busy && r.main.kind === "warn", (el) => el.child(div().id(`main-${r.target.id}`).flex_none().text_color(t.ansi1).tooltip(`main: ${r.main.why}`).child(r.main.text)));
+  }
+
+  row(r, t) {
+    const on = r.spaces.some((s) => s.active);
+    const rowsNow = this.shownRows ?? [];
+    const at = (key) => rowsNow.findIndex((x) => x.key === key);
+    const pressed = this.pressed && rowsNow.find((x) => x.key === this.pressed);
+    const tip = rowTooltip(r.activity.agents, r.main);
     return v_flex()
       .relative()
-      .id(`space-${w.id}`)
+      .id(`space-${r.target.id}`)
       .px(8)
-      .h(rowHeight({ tree }))
+      .h(ROW_HEIGHT)
       .flex_none()
       .justify_center()
       .rounded(8)
       .when(on, (el) => el.bg(t.selected))
       .when(!on, (el) => el.hover((s) => s.bg(t.hover)))
-      .when(this.pressed === w.id && this.over !== w.id, (el) => el.opacity(0.5))
-      .when(this.pressed !== null && this.over === w.id && this.pressed !== w.id, (el) => el.child(
+      .when(Boolean(tip), (el) => el.tooltip(tip))
+      .when(this.pressed === r.key && this.over !== r.key, (el) => el.opacity(0.5))
+      .when(Boolean(pressed) && this.over === r.key && this.pressed !== r.key, (el) => el.child(
         div().absolute().left(0).right(0).h(2).bg(t.accent)
-          .when(fromIndex < i, line => line.bottom(0))
-          .when(fromIndex > i, line => line.top(0)),
+          .when(at(this.pressed) < at(r.key), line => line.bottom(0))
+          .when(at(this.pressed) > at(r.key), line => line.top(0)),
       ))
       .on_mouse_down("left", () => {
-        this.pressed = w.id;
-        this.over = w.id;
+        this.pressed = r.key;
+        this.over = r.key;
       })
       .on_mouse_move((_e, cx) => {
-        const source = spaces().find(s => s.id === this.pressed);
-        const over = source && (source.machine ?? null) === (w.machine ?? null) ? w.id : null;
+        const source = this.pressed && rowsNow.find((x) => x.key === this.pressed);
+        // Rows that need you or work keep their place at the top; the rest reorder.
+        const over = source && (source.target.machine ?? null) === (r.target.machine ?? null) && rank(source) === 2 && rank(r) === 2 ? r.key : null;
         if (this.pressed !== null && this.over !== over) {
           this.over = over;
           cx.notify();
         }
       })
       .on_mouse_up("left", (_e, cx) => {
-        const from = this.pressed;
+        const from = this.pressed && rowsNow.find((x) => x.key === this.pressed);
         const over = this.over;
         this.pressed = null;
         this.over = null;
-        if (from !== null && over === w.id && from !== w.id) {
-          const index = spaces().findIndex(s => s.id === w.id);
-          if (index !== -1) run("space.move", { id: from, index: index + 1 });
-        } else if (from === w.id) run("space.select", { id: w.id });
+        if (from && over === r.key && from.key !== r.key) this.drop(from, r);
+        else if (from?.key === r.key) run("space.select", { id: r.target.id });
         cx.notify();
       })
-      .on_mouse_down("right", () => this.menu(w))
+      .on_mouse_down("right", () => this.menu(r.target))
       .child(
         h_flex()
           .gap(9)
           .items_center()
-          .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).text_color(t.dim)))
-          .when(!tree, el => el.child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?")))
-          .child(div().flex_shrink(0).max_w(150).truncate().text_color(t.foreground).child(w.name))
-          .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1()),
+          .child(this.avatar(r, t))
+          .child(div().flex_shrink(0).max_w(150).truncate().text_color(t.foreground).child(r.name ?? r.target.name))
+          .child(this.tail(r, t)),
       );
   }
 
-  compact({ w, i }, t) {
+  // The narrow rail: the avatar, ringed when something there needs you.
+  compact(r, t) {
+    const on = r.spaces.some((s) => s.active);
+    const need = rank(r) === 0;
+    const tip = [r.name ?? r.target.name, rowTooltip(r.activity.agents, r.main)].filter(Boolean).join("\n");
     return railCell(h_flex()
-      .id(`space-${w.id}`)
-      .relative()
+      .id(`space-${r.target.id}`)
       .w(RAIL_CELL)
-      .h(26)
+      .h(28)
       .rounded(6)
       .justify_center()
       .items_center()
-      .when(w.active, (el) => el.bg(t.selected))
-      .when(!w.active, (el) => el.hover((s) => s.bg(t.hover)))
-      .on_click(() => run("space.select", { id: w.id }))
-      .child(div().text_color(w.active ? t.foreground : t.muted).child(String(i + 1)))
-      .child(div().absolute().right(5).text_color(tone(t, w.status)).child(glyph(w.status))));
+      .tooltip(tip)
+      .when(on, (el) => el.bg(t.selected))
+      .when(!on, (el) => el.hover((s) => s.bg(t.hover)))
+      .on_click(() => run("space.select", { id: r.target.id }))
+      .on_mouse_down("right", () => this.menu(r.target))
+      .child(h_flex().size(24).flex_none().rounded(7).items_center().justify_center()
+        .when(need, (el) => el.border(2).border_color(t.blocked))
+        .child(this.avatar(r, t))));
   }
 
   render() {

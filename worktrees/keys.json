@@ -1,0 +1,5 @@
+{
+  "layout:main-accounts": {
+    "cmd-shift-u": "spaces-ws.update"
+  }
+}

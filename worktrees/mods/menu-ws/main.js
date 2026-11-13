@@ -1,11 +1,12 @@
 // Context menus (Herdr's items). Opened as a popup with
 // props { tab: "pane" | "tab" | "space" | "global", target }.
 // ↑/↓ move, Enter runs, Esc closes. An item is [label, command, args];
-// a command "worktree" opens the worktree dialog instead.
+// a command "worktree" opens the worktree dialog instead, and "update-main"
+// asks spaces-ws to run `ws update` for the space's project (it outlives this popup).
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec } from "herdr";
+import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec, shared, setShared } from "herdr";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 function place(s) {
@@ -62,6 +63,7 @@ function items(p, git) {
       ];
     case "space":
       return [
+        ...(git ? [["Update main", "update-main", { space: tg.id }]] : []),
         ["Rename", "space.rename", { id: tg.id }],
         ...(git ? [["New worktree", "worktree", { space: tg.id, action: "new", mod: "worktree-ws" }], ["Open worktree", "worktree", { space: tg.id, action: "open", mod: "worktree-ws" }], ["Clean up worktrees", "worktree", { space: tg.id, action: "clean", mod: "worktree-ws" }]] : []),
         ...(git === "linked" ? [["Remove worktree", "worktree", { space: tg.id, action: "remove" }]] : []),
@@ -80,12 +82,14 @@ function items(p, git) {
 }
 
 function menuIcon(command) {
-  const name = command.endsWith(".close") ? "x" : command.endsWith(".rename") ? "square-pen" : command.endsWith(".new") ? "plus" : command === "worktree" ? "git-branch" : command === "app.help" ? "terminal" : command === "app.theme" ? "settings" : command === "pane.split" ? "panel-right" : command === "pane.zoom" ? "square" : "terminal";
+  const name = command.endsWith(".close") ? "x" : command.endsWith(".rename") ? "square-pen" : command.endsWith(".new") ? "plus" : command === "worktree" ? "git-branch" : command === "update-main" ? "git-compare" : command === "app.help" ? "terminal" : command === "app.theme" ? "settings" : command === "pane.split" ? "panel-right" : command === "pane.zoom" ? "square" : "terminal";
   return `mods/workspace-chrome/${name}.svg`;
 }
 
 // The key bound to a command, for the hint on the right.
 function shortcut(name, args) {
+  // Update main's key is spaces-ws's own, bound for its layout.
+  if (name === "update-main") return keys().find((b) => b.action === "spaces-ws.update" && (b.section === "global" || b.section === `layout:${shared("layout")}`))?.keys ?? "";
   // `pane.split:right` binds pane.split with { direction: "right" }.
   const value = args && Object.values(args)[0];
   const k = keys().find((b) => b.section === "global" && (b.action === name || b.action === `${name}:${value}`));
@@ -113,6 +117,7 @@ export default class Menu extends View {
     if (!it) return;
     closeOverlay(props()?.overlay);
     if (it[1] === "worktree") openOverlay({ mod: it[2].mod ?? "worktree", kind: "dialog", ...(it[2].action === "clean" ? { width: 620, height: 520 } : it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
+    else if (it[1] === "update-main") setShared("spaces-ws.update", { space: it[2].space, at: Date.now() });
     else run(it[1], it[2]);
   }
 
