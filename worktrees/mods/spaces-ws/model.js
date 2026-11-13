@@ -73,3 +73,24 @@ export const ORGS = [["ag", "AG"], ["cs", "CS"], ["personal", "PERSONAL"], ["oth
 export function orgOf(dir) {
   return /\/mac-workspace\/(ag|cs|personal)\//.exec(`${dir ?? ""}/`)?.[1] ?? "other";
 }
+
+// What clicking the main mark does: "switch" puts the main checkout back on main,
+// "pull" fast-forwards it from origin, null when there is nothing to do (no main
+// checkout, or main has no upstream to pull from).
+export function mainAction(m) {
+  if (!m) return null;
+  if (m.branch !== "main" && m.branch !== "master") return "switch";
+  return m.behind == null ? null : "pull";
+}
+
+// The toast after a pull: how many commits it brought in (null: unknown).
+export function pulledText(n) {
+  if (n == null) return "main is up to date with origin";
+  return n > 0 ? `pulled ${n} commit${n === 1 ? "" : "s"}` : "already up to date";
+}
+
+// Why a pull failed: git's first line of complaint, else its exit code.
+export function pullFailure(r) {
+  const line = (r?.stderr ?? "").trim().split("\n")[0];
+  return line || `git exited with code ${r?.code ?? "?"}`;
+}

@@ -6,7 +6,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout, notify } from "herdr";
-import { repoName, worktreeCount, mainPane, mainCheckout, asleep, spacePlace, orgOf, ORGS } from "./model.js";
+import { repoName, worktreeCount, mainPane, mainCheckout, asleep, spacePlace, orgOf, ORGS, mainAction, pulledText, pullFailure } from "./model.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -51,6 +51,7 @@ export function tone(t, status) {
 
 export default class Spaces extends View {
   init(_props, cx) {
+    this.pulling = new Set(); // space ids whose main is being pulled
     this.git = {}; // where() -> { name, branch, ahead, behind, repo, linked }, null: not a repo
     this.checked = {}; // where() -> when it was last looked at
     this.unsure = new Set(); // where()s git couldn't answer for (a machine away)
@@ -354,6 +355,37 @@ export default class Spaces extends View {
     });
   }
 
+  // Update a project's main checkout from origin: fast-forward only, so it never
+  // merges, rebases or touches local edits git can't carry. Git refuses otherwise,
+  // and its first line of complaint becomes the toast.
+  pullMain(w, m, cx) {
+    if (this.pulling.has(w.id)) return;
+    this.pulling.add(w.id);
+    cx.notify();
+    const on = w.machine ?? null;
+    cx.spawn(async (cx) => {
+      const git = (args) => exec("git", args, { cwd: m.path, on }).catch(() => ({ code: 1, stdout: "", stderr: "couldn't run git" }));
+      // What the pull brought in is told by HEAD before and after, not by the last fetch.
+      try {
+        const head = await git(["rev-parse", "HEAD"]);
+        const before = head.code === 0 ? head.stdout.trim() : "";
+        const r = await git(["pull", "--ff-only", "--quiet"]);
+        if (r.code !== 0) notify({ title: `${w.name}: main not updated`, body: pullFailure(r), level: "warning" });
+        else {
+          // An unreadable count is unknown, never "already up to date".
+          const c = before ? await git(["rev-list", "--count", `${before}..HEAD`]) : null;
+          const n = c?.code === 0 && /^\d+$/.test(c.stdout.trim()) ? Number(c.stdout.trim()) : null;
+          notify({ title: `${w.name}: main updated`, body: pulledText(n), level: "info" });
+        }
+      } finally {
+        // Never leave the mark stuck on "…".
+        this.pulling.delete(w.id);
+        cx.notify();
+      }
+      this.refreshGit(new Set([where(w, panes())]), cx);
+    });
+  }
+
   menu(w) {
     // A popup is as tall as its items; height is only the most.
     openOverlay({ mod: "menu-ws", kind: "popup", width: 210, height: 300, props: { tab: "space", target: { id: w.id } } });
@@ -477,12 +509,12 @@ export default class Spaces extends View {
   gitTail(g, tree, w, t) {
     const id = w.id;
     const m = g.main;
-    const onMain = m && (m.branch === "main" || m.branch === "master");
-    const state = tree || !m ? null
-      : !onMain ? { text: "\u26a0", color: t.ansi1, fix: true, tip: `main checkout is on ${m.branch || "a detached HEAD"}, not main. Click: switch it to main and open its agent` }
-      : m.behind > 0 ? { text: `\u2193${m.behind}`, color: t.ansi1, tip: `main is ${m.behind} commit${m.behind === 1 ? "" : "s"} behind origin (last fetch)` }
-      : m.behind === 0 ? { text: "\u2713", color: t.ansi2, tip: "main is up to date (last fetch)" }
-      : null;
+    const act = tree ? null : mainAction(m);
+    const state = !act ? null
+      : act === "switch" ? { text: "\u26a0", color: t.ansi1, tip: `main checkout is on ${m.branch || "a detached HEAD"}, not main. Click: switch it to main and open its agent` }
+      : this.pulling.has(id) ? { text: "\u2026", color: t.dim, tip: "updating main from origin" }
+      : m.behind > 0 ? { text: `\u2193${m.behind}`, color: t.ansi1, tip: `main is ${m.behind} commit${m.behind === 1 ? "" : "s"} behind origin (last fetch). Click: pull it` }
+      : { text: "\u2713", color: t.ansi2, tip: "main is up to date (last fetch). Click: pull to check again" };
     return h_flex()
       .flex_1()
       .min_w(0)
@@ -496,9 +528,9 @@ export default class Spaces extends View {
         .child(svg("mods/workspace-chrome/branch.svg").size(11)).child(String(g.worktrees))))
       .when(asleep(w), (el) => el.child(div().id(`space-asleep-${id}`).flex_none().tooltip("Agents asleep: they resume when you open this space").child("\u263e")))
       .when(Boolean(state), (el) => el.child(div().id(`space-main-${id}`).flex_none().text_color(state.color).tooltip(state.tip)
-        .when(Boolean(state.fix), (b) => b.px(3).rounded(4).cursor_pointer().hover((s) => s.bg(t.hover))
-          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-          .on_click((_e, cx) => { cx.stop_propagation(); this.toMain(w, m, cx); }))
+        .px(3).rounded(4).cursor_pointer().hover((s) => s.bg(t.hover))
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click((_e, cx) => { cx.stop_propagation(); act === "switch" ? this.toMain(w, m, cx) : this.pullMain(w, m, cx); })
         .child(state.text)));
   }
 

@@ -177,3 +177,28 @@ test("a space's organization comes from its mac-workspace group, else other", as
   assert.equal(orgOf(`${H}/code/app`), "other");
   assert.equal(orgOf(null), "other");
 });
+
+test("the main mark's click: switch when off main, pull when on main, nothing without a main", async () => {
+  const { mainAction } = await import("../worktrees/mods/spaces-ws/model.js");
+  assert.equal(mainAction({ branch: "feat/x", behind: 0 }), "switch");
+  assert.equal(mainAction({ branch: "", behind: null }), "switch");
+  assert.equal(mainAction({ branch: "main", behind: 3 }), "pull");
+  assert.equal(mainAction({ branch: "master", behind: 0 }), "pull");
+  assert.equal(mainAction({ branch: "main", behind: null }), null);
+  assert.equal(mainAction(null), null);
+});
+
+test("the pull toast says what the pull brought in, and why it failed even when git is silent", async () => {
+  const { pulledText, pullFailure } = await import("../worktrees/mods/spaces-ws/model.js");
+  assert.equal(pulledText(0), "already up to date");
+  assert.equal(pulledText(1), "pulled 1 commit");
+  assert.equal(pulledText(5), "pulled 5 commits");
+  assert.equal(pullFailure({ code: 128, stderr: "fatal: Not possible to fast-forward, aborting.\nhint: x" }), "fatal: Not possible to fast-forward, aborting.");
+  assert.equal(pullFailure({ code: 1, stderr: "  \n" }), "git exited with code 1");
+  assert.equal(pullFailure({ code: 2 }), "git exited with code 2");
+});
+
+test("a pull whose count can't be read says it updated, without a number", async () => {
+  const { pulledText } = await import("../worktrees/mods/spaces-ws/model.js");
+  assert.equal(pulledText(null), "main is up to date with origin");
+});
