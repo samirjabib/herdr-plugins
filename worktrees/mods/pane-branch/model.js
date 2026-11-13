@@ -20,3 +20,11 @@ export function withAlpha(color, aa) {
   const hex = m[1].length === 3 ? m[1].split("").map((ch) => ch + ch).join("") : m[1].slice(0, 6);
   return `#${hex}${aa}`;
 }
+
+// Main's marker in the header: "live" on a project's main checkout when it is on
+// main (or master), the place to update and to orchestrate from; "off-main" when
+// that checkout is on another branch; null anywhere else or before git answers.
+export function mainState(wt, branch) {
+  if (wt?.wt !== "main" || !branch) return null;
+  return branch === "main" || branch === "master" ? "live" : "off-main";
+}

@@ -6,6 +6,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { run, props, closeOverlay, openOverlay, theme, keys, terminals, spaces, panes, exec } from "herdr";
+import { sleepCommandFor } from "./model.js";
 
 // Where a space is now: its first terminal's live folder, else where it was made.
 function place(s) {
@@ -21,7 +22,7 @@ async function checkout(folder, on) {
   return common.stdout.trim() === `${top.stdout.trim()}/.git` ? "main" : "linked";
 }
 
-function items(p, git) {
+function items(p, git, sleep) {
   p = p ?? {};
   const tg = p.target ?? {};
   switch (p.tab) {
@@ -65,6 +66,8 @@ function items(p, git) {
         ["Rename", "space.rename", { id: tg.id }],
         ...(git ? [["New worktree", "worktree", { space: tg.id, action: "new", mod: "worktree-ws" }], ["Open worktree", "worktree", { space: tg.id, action: "open", mod: "worktree-ws" }], ["Clean up worktrees", "worktree", { space: tg.id, action: "clean", mod: "worktree-ws" }]] : []),
         ...(git === "linked" ? [["Remove worktree", "worktree", { space: tg.id, action: "remove" }]] : []),
+        // agent-sleep: its Claudes stop and resume with `claude --resume` when it shows again.
+        ...(sleep ? [["Sleep agents", sleep, {}]] : []),
         ["Close", "space.close", { id: tg.id }],
       ];
     default:
@@ -80,6 +83,7 @@ function items(p, git) {
 }
 
 function menuIcon(command) {
+  if (command.startsWith("agent-sleep.")) return "mods/agent-sleep/icons/moon.svg";
   const name = command.endsWith(".close") ? "x" : command.endsWith(".rename") ? "square-pen" : command.endsWith(".new") ? "plus" : command === "worktree" ? "git-branch" : command === "app.help" ? "terminal" : command === "app.theme" ? "settings" : command === "pane.split" ? "panel-right" : command === "pane.zoom" ? "square" : "terminal";
   return `mods/workspace-chrome/${name}.svg`;
 }
@@ -105,11 +109,20 @@ export default class Menu extends View {
       cx.spawn(async (cx) => {
         this.git = await checkout(folder, space.machine).catch(() => null);
         cx.notify();
+        // agent-sleep only sleeps this computer's spaces. Its item comes after the
+        // others are drawn, and a failure here never hides them.
+        if (this.git && !space.machine) {
+          try {
+            const list = await exec("git", ["worktree", "list", "--porcelain"], { cwd: folder });
+            this.sleep = list.code === 0 ? sleepCommandFor(folder, list.stdout) : null;
+          } catch { this.sleep = null; }
+          cx.notify();
+        }
       });
   }
 
   choose(i, cx) {
-    const it = items(props(), this.git)[i];
+    const it = items(props(), this.git, this.sleep)[i];
     if (!it) return;
     closeOverlay(props()?.overlay);
     if (it[1] === "worktree") openOverlay({ mod: it[2].mod ?? "worktree", kind: "dialog", ...(it[2].action === "clean" ? { width: 620, height: 520 } : it[2].action === "open" ? { width: 560, height: 480 } : { width: 440, height: 260 }), props: it[2] });
@@ -118,7 +131,7 @@ export default class Menu extends View {
 
   render(cx) {
     const t = theme();
-    const list = items(props(), this.git);
+    const list = items(props(), this.git, this.sleep);
     return v_flex()
       .id("menu")
       .track_focus(this.handle)

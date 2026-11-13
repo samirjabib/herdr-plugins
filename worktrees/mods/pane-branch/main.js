@@ -7,7 +7,10 @@
 import { View, div, svg, image } from "gpui-kit";
 import { h_flex } from "gpui-base";
 import { panes, props, run, theme, home, layout, exec, openOverlay } from "herdr";
-import { worktreeOf, withAlpha } from "./model.js";
+import { worktreeOf, withAlpha, mainState } from "./model.js";
+
+// Main's marker: the project's main checkout on main, where to update and orchestrate from.
+const GOLD = "#c9a75a";
 
 // Match the first visible tab frame, including the active child of a stack.
 function paneFrame(node) {
@@ -94,6 +97,7 @@ export default class Pane extends View {
     const wt = worktreeOf(p.cwd);
     const pane = p.pane;
     const bottom = paneFrame(layout())?.header?.position === "bottom";
+    const main = mainState(wt, p.branch || this.gitBranch);
     return h_flex()
       .id(`pane-head-${pane}`)
       .size_full()
@@ -127,6 +131,10 @@ export default class Pane extends View {
       .when(Boolean(p.branch || this.gitBranch), el => el.child(h_flex().flex_none().gap(4).items_center().max_w(240).text_color(t.accent)
         .child(svg("mods/pane-branch/git-branch.svg").size(12).flex_none())
         .child(div().truncate().child(p.branch || this.gitBranch))))
+      .when(main === "live", el => el.child(div().id(`ph-main-${pane}`).flex_none().text_size(11).text_color(GOLD)
+        .tooltip("Main checkout on main: update it here and make worktrees from it").child("\u2605")))
+      .when(main === "off-main", el => el.child(div().id(`ph-main-${pane}`).flex_none().text_size(11).text_color(t.blocked)
+        .tooltip("Main checkout, but not on main: switch it back before updating").child("\u26a0")))
       .when(!wt && Boolean(p.cwd), el => el.child(div().flex_none().max_w(280).truncate().text_color(t.dim).child(folder(p.cwd))))
       .child(div().flex_1())
       .when(st === "working", el => el.child(svg("mods/workspace-chrome/spinner.svg").size(12).flex_none().text_color(t.working).spin(900)))

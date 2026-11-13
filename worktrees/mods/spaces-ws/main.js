@@ -5,7 +5,8 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout } from "herdr";
+import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout, notify } from "herdr";
+import { repoName, worktreeCount, mainPane, mainCheckout, asleep, spacePlace } from "./model.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -19,17 +20,18 @@ function find(node, id) {
 // The sidebar's rail goes by its width, not a flag: dragging its edge narrows it too.
 const narrow = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
 
-// Where a space is now: its first terminal's live folder, else where it was made.
-// `ps`: panes(), read once by the caller (each read copies every pane).
+// Each terminal's foreground program's folder, from `hc get` (read every few
+// seconds): Herdr's own folders lag behind where Claude actually runs.
+let LIVE = {};
+// Where a space is now (spacePlace). `ps`: panes(), read once by the caller.
 function place(s, ps) {
-  const tabs = new Set((s.tabs ?? []).map((c) => c.id));
-  return ps.find((p) => tabs.has(p.tab) && p.cwd)?.cwd || s.folder;
+  return spacePlace(s, ps, LIVE);
 }
 const rowHeight = ({ tree }) => (tree ? 28 : 30);
 const RAIL_CELL = 32;
 const railCell = (el) => h_flex().flex_none().justify_center().child(el);
 const where = (s, ps) => JSON.stringify([s.machine ?? null, place(s, ps)]);
-const base = (path) => path.replace(/\/+$/, "").split("/").pop();
+
 // Changes made outside Herdr (an editor's save, a commit in another app): looked
 // for this often, in repos the list shows, while the window is in front.
 const FALLBACK = 60000;
@@ -69,8 +71,28 @@ export default class Spaces extends View {
     this.folded = new Set(JSON.parse(localStorage.getItem("machines.folded") ?? "[]"));
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
+    this.refreshLive(cx);
+    cx.timer.every(5000, (cx) => this.refreshLive(cx));
     // Refresh only when the refs could have changed (see `due`).
     cx.timer.every(250, (cx) => this.checkNew(cx));
+  }
+
+  refreshLive(cx) {
+    if (this.readingLive) return;
+    this.readingLive = true;
+    cx.spawn(async (cx) => {
+      try {
+        // `hc ls` has no foreground: one `hc get` per terminal in a pane (a few ms each).
+        const next = {};
+        for (const t of new Set(panes().filter((p) => p.terminal && !p.machine).map((p) => p.terminal))) {
+          const r = await hc(["get", t, "--json"]).catch(() => null);
+          const cwd = r?.code === 0 ? JSON.parse(r.stdout).foreground?.cwd : null;
+          if (cwd) next[t] = cwd;
+        }
+        if (JSON.stringify(next) !== JSON.stringify(LIVE)) { LIVE = next; cx.notify(); }
+      } catch {}
+      this.readingLive = false;
+    });
   }
 
   checkNew(cx) {
@@ -214,13 +236,19 @@ export default class Spaces extends View {
       }
       // The repo's own .git folder names it; a worktree's top differs from it.
       const top = r.stdout.replace(/\n$/, ""), repo = common.stdout.replace(/\n$/, "");
-      const [branch, counts] = await Promise.all([
+      const [branch, counts, trees] = await Promise.all([
         exec("git", ["symbolic-ref", "-q", "HEAD"], { cwd, on }),
         exec("git", ["rev-list", "--left-right", "--count", "HEAD...@{upstream}"], { cwd, on }),
+        exec("git", ["worktree", "list", "--porcelain"], { cwd, on }),
       ]);
-      const name = repo.endsWith("/.git") ? base(repo.slice(0, -5)) : base(repo).replace(/\.git$/, "");
+      const name = repoName(repo);
+      // The project's main checkout: its branch and how far behind its upstream it is,
+      // as last fetched (the list never fetches). behind null: no upstream.
+      const main = trees.code === 0 ? mainCheckout(trees.stdout) : null;
+      const late = main ? await exec("git", ["rev-list", "--count", "HEAD..@{upstream}"], { cwd: main.path, on }).catch(() => null) : null;
+      const mainInfo = main && { path: main.path, branch: main.branch, behind: late?.code === 0 ? Number(late.stdout.trim()) : null };
       const [ahead, behind] = counts.code === 0 ? counts.stdout.trim().split(/\s+/).map(Number) : [0, 0];
-      const info = { name, branch: branch.code === 0 ? branch.stdout.trim().replace(/^refs\/heads\//, "") : "(detached)", ahead, behind, repo: JSON.stringify([on, repo]), linked: repo !== `${top}/.git` };
+      const info = { name, branch: branch.code === 0 ? branch.stdout.trim().replace(/^refs\/heads\//, "") : "(detached)", ahead, behind, worktrees: trees.code === 0 ? worktreeCount(trees.stdout) : 0, main: mainInfo, repo: JSON.stringify([on, repo]), linked: repo !== `${top}/.git` };
       this.git[key] = info;
       if (!on) this.watch(repo, cx);
     } catch {
@@ -241,6 +269,39 @@ export default class Spaces extends View {
           if (this.watching.has(repo)) this.refreshGit(Object.keys(this.git).filter((k) => this.git[k]?.repo === mine), cx);
         }
       } catch { this.watching.delete(repo); }
+    });
+  }
+
+  // Entering a space lands on its main checkout's pane, where the orchestrator
+  // sits; clicking the space you are already in leaves focus where it is.
+  open(w) {
+    const target = !w.active && mainPane(w, panes(), LIVE);
+    run("space.select", { id: w.id });
+    if (target) run("pane.focus", { pane: target });
+  }
+
+  // Bring a project's main checkout back to main (only when nothing uncommitted is
+  // there: a switch never carries edits), then land on its agent: the pane already
+  // in main, else a new tab there with Claude.
+  toMain(w, m, cx) {
+    const on = w.machine ?? null;
+    cx.spawn(async (cx) => {
+      const name = w.name;
+      const git = (args) => exec("git", args, { cwd: m.path, on }).catch(() => ({ code: 1, stdout: "", stderr: "couldn't run git" }));
+      const dirty = await git(["status", "--porcelain", "-uno"]);
+      if (dirty.code !== 0 || dirty.stdout.trim()) {
+        notify({ title: `${name}: main not switched`, body: `${m.branch} has uncommitted changes in ${m.path}`, level: "warning" });
+      } else {
+        let r = await git(["switch", "main"]);
+        if (r.code !== 0) r = await git(["switch", "master"]);
+        if (r.code !== 0) notify({ title: `${name}: main not switched`, body: (r.stderr || "").trim().split("\n")[0], level: "warning" });
+        else notify({ title: `${name}: main checkout back on main`, body: `was on ${m.branch}`, level: "info" });
+      }
+      run("space.select", { id: w.id });
+      const pane = mainPane(w, panes(), LIVE);
+      if (pane) run("pane.focus", { pane });
+      else run("tab.new", { space: w.id, name: "main", folder: m.path, argv: ["claude"] });
+      this.refreshGit(new Set([where(w, panes())]), cx);
     });
   }
 
@@ -362,26 +423,34 @@ export default class Spaces extends View {
     });
   }
 
-  // Only what's unusual, after the name: "herdr \u00b7 spike \u21912 \u21931". The repo or
-  // branch goes when the name already says it (a worktree is named after its branch),
-  // and master/main go: nearly every space is on one.
-  gitTail(g, tree, name, t) {
-    const raw = g.branch ?? "detached";
-    const same = (a) => a.toLowerCase() === name.toLowerCase();
-    const branch = same(raw) || raw === "master" || raw === "main" ? "" : raw;
-    const repo = tree || same(g.name) ? "" : g.name;
-    const where = [repo, branch].filter(Boolean).join(" \u00b7 ");
+  // After the name: how many worktrees the project has, and whether its main
+  // checkout is fresh: \u2713 up to date, \u2193N behind (as last fetched), \u26a0 not on main.
+  gitTail(g, tree, w, t) {
+    const id = w.id;
+    const m = g.main;
+    const onMain = m && (m.branch === "main" || m.branch === "master");
+    const state = tree || !m ? null
+      : !onMain ? { text: "\u26a0", color: t.ansi1, fix: true, tip: `main checkout is on ${m.branch || "a detached HEAD"}, not main. Click: switch it to main and open its agent` }
+      : m.behind > 0 ? { text: `\u2193${m.behind}`, color: t.ansi1, tip: `main is ${m.behind} commit${m.behind === 1 ? "" : "s"} behind origin (last fetch)` }
+      : m.behind === 0 ? { text: "\u2713", color: t.ansi2, tip: "main is up to date (last fetch)" }
+      : null;
     return h_flex()
       .flex_1()
       .min_w(0)
-      .gap(5)
+      .gap(7)
       .justify_end()
       .items_center()
       .text_size(11.5)
       .text_color(t.dim)
-      .when(Boolean(where), (el) => el.child(div().min_w(0).truncate().child(where)))
-      .when(g.ahead > 0, (el) => el.child(div().flex_none().text_color(t.ansi2).child(`\u2191${g.ahead}`)))
-      .when(g.behind > 0, (el) => el.child(div().flex_none().text_color(t.ansi1).child(`\u2193${g.behind}`)));
+      .when(!tree && g.worktrees > 0, (el) => el.child(h_flex().id(`space-wt-${id}`).flex_none().gap(3).items_center()
+        .tooltip(`${g.worktrees} worktree${g.worktrees === 1 ? "" : "s"}`)
+        .child(svg("mods/workspace-chrome/branch.svg").size(11)).child(String(g.worktrees))))
+      .when(asleep(w), (el) => el.child(div().id(`space-asleep-${id}`).flex_none().tooltip("Agents asleep: they resume when you open this space").child("\u263e")))
+      .when(Boolean(state), (el) => el.child(div().id(`space-main-${id}`).flex_none().text_color(state.color).tooltip(state.tip)
+        .when(Boolean(state.fix), (b) => b.px(3).rounded(4).cursor_pointer().hover((s) => s.bg(t.hover))
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => { cx.stop_propagation(); this.toMain(w, m, cx); }))
+        .child(state.text)));
   }
 
   row({ w, i, g, tree }, t) {
@@ -426,7 +495,7 @@ export default class Spaces extends View {
         if (from !== null && over === w.id && from !== w.id) {
           const index = spaces().findIndex(s => s.id === w.id);
           if (index !== -1) run("space.move", { id: from, index: index + 1 });
-        } else if (from === w.id) run("space.select", { id: w.id });
+        } else if (from === w.id) this.open(w);
         cx.notify();
       })
       .on_mouse_down("right", () => this.menu(w))
@@ -437,7 +506,7 @@ export default class Spaces extends View {
           .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).text_color(t.dim)))
           .when(!tree, el => el.child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?")))
           .child(div().flex_shrink(0).max_w(150).truncate().text_color(t.foreground).child(w.name))
-          .child(g ? this.gitTail(g, tree, w.name, t) : div().flex_1()),
+          .child(g ? this.gitTail(g, tree, w, t) : div().flex_1()),
       );
   }
 
@@ -452,7 +521,7 @@ export default class Spaces extends View {
       .items_center()
       .when(w.active, (el) => el.bg(t.selected))
       .when(!w.active, (el) => el.hover((s) => s.bg(t.hover)))
-      .on_click(() => run("space.select", { id: w.id }))
+      .on_click(() => this.open(w))
       .child(div().text_color(w.active ? t.foreground : t.muted).child(String(i + 1)))
       .child(div().absolute().right(5).text_color(tone(t, w.status)).child(glyph(w.status))));
   }

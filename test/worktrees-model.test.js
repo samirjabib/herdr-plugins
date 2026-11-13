@@ -105,3 +105,65 @@ test("files-ws and changes-ws name a checkout like the pane header", async () =>
     assert.equal(a("#ffffff18", "1f"), "#ffffff1f");
   }
 });
+
+test("the header marks main: live on the main branch, a warning on another", async () => {
+  const { mainState } = await import("../worktrees/mods/pane-branch/model.js");
+  const m = { project: "shop", wt: "main" };
+  assert.equal(mainState(m, "main"), "live");
+  assert.equal(mainState(m, "master"), "live");
+  assert.equal(mainState(m, "feat/cart"), "off-main");
+  assert.equal(mainState(m, ""), null); // branch not read yet
+  assert.equal(mainState({ project: "shop", wt: "fix-cart" }, "main"), null);
+  assert.equal(mainState(null, "main"), null);
+});
+
+test("the sidebar names a repo by project, counts its worktrees and finds main's pane", async () => {
+  const { repoName, worktreeCount, mainPane } = await import("../worktrees/mods/spaces-ws/model.js");
+  assert.equal(repoName(`${H}/mac-workspace/ag/shop/main/.git`), "shop");
+  assert.equal(repoName(`${H}/code/app/.git`), "app");
+  assert.equal(repoName(`${H}/bare/app.git`), "app");
+  const porcelain = `worktree ${H}/m/main\nHEAD 1\nbranch refs/heads/main\n\nworktree ${H}/m/worktrees/a\nHEAD 2\nbranch refs/heads/a\n\nworktree ${H}/m/worktrees/b\nHEAD 3\ndetached\n`;
+  assert.equal(worktreeCount(porcelain), 2);
+  assert.equal(worktreeCount(`worktree ${H}/m/main\nHEAD 1\n`), 0);
+  assert.equal(worktreeCount(""), 0);
+  const ps = [
+    { pane: "p1", tab: "t1", cwd: `${H}/mac-workspace/ag/shop/worktrees/a` },
+    { pane: "p2", tab: "t2", cwd: `${H}/mac-workspace/ag/shop/main/src` },
+    { pane: "p3", tab: "x", cwd: `${H}/mac-workspace/ag/shop/main` },
+  ];
+  assert.equal(mainPane({ tabs: [{ id: "t1" }, { id: "t2" }] }, ps), "p2");
+  assert.equal(mainPane({ tabs: [{ id: "t1" }] }, ps), null);
+});
+
+test("the sidebar reads the main checkout and its branch from the worktree list", async () => {
+  const { mainCheckout } = await import("../worktrees/mods/spaces-ws/model.js");
+  const porcelain = `worktree ${H}/m/main\nHEAD 1\nbranch refs/heads/main\n\nworktree ${H}/m/worktrees/a\nHEAD 2\nbranch refs/heads/a\n`;
+  assert.deepEqual(mainCheckout(porcelain), { path: `${H}/m/main`, branch: "main" });
+  assert.deepEqual(mainCheckout(`worktree ${H}/m/main\nHEAD 1\ndetached\n`), { path: `${H}/m/main`, branch: "" });
+  assert.equal(mainCheckout(""), null);
+});
+
+test("a space on a project's main checkout goes by that folder", async () => {
+  const { isMainFolder } = await import("../worktrees/mods/spaces-ws/model.js");
+  assert.equal(isMainFolder(`${H}/mac-workspace/ag/miss-me/main`), true);
+  assert.equal(isMainFolder(`${H}/mac-workspace/ag/miss-me/worktrees/x`), false);
+  assert.equal(isMainFolder(`${H}/code/app`), false);
+  assert.equal(isMainFolder(null), false);
+});
+
+test("a space is where its terminals run now, the one of its named project first", async () => {
+  const { spacePlace } = await import("../worktrees/mods/spaces-ws/model.js");
+  const W = `${H}/mac-workspace/ag`;
+  const ps = [
+    { pane: "p1", tab: "t1", terminal: "a", cwd: `${W}/miss-me/main` },
+    { pane: "p2", tab: "t1", terminal: "b", cwd: `${W}/miss-me/worktrees/x` },
+  ];
+  const live = { a: `${W}/ai-time/main` };
+  // Claude in a moved there, but the space is named after miss-me: b's folder is miss-me's.
+  assert.equal(spacePlace({ name: "miss-me", tabs: [{ id: "t1" }], folder: "/x" }, ps, live), `${W}/miss-me/worktrees/x`);
+  // No terminal of the named project: the first terminal's live folder, not where the space was made.
+  assert.equal(spacePlace({ name: "loop", tabs: [{ id: "t1" }], folder: "/x" }, ps, live), `${W}/ai-time/main`);
+  // A project's main checkout wins over its worktrees.
+  assert.equal(spacePlace({ name: "miss-me", tabs: [{ id: "t1" }] }, ps, {}), `${W}/miss-me/main`);
+  assert.equal(spacePlace({ name: "x", tabs: [], folder: "/made" }, ps, live), "/made");
+});
