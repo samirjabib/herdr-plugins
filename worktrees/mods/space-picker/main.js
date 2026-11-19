@@ -3,11 +3,13 @@
 // goes there; otherwise a space opens on its main checkout with Claude. A
 // worktree opens as a tab in its project's space. Projects in the catalog that
 // aren't cloned here say how to bring them; "Other folder…" asks the system.
-// Props: { org }. Type to search, ↑/↓, Enter, Tab for the next organization, Esc.
+// "New terminal" is Herdr's plain "+" and "<ORG> folder" a shell at the
+// organization's root; ⌘⏎ opens New worktree for the selected project.
+// Props: { org }. Type to search, ↑/↓, Enter, ⌘⏎, Tab for the next organization, Esc.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { spaces, panes, run, exec, theme, props, closeOverlay, home, readTextFile, notify, pickFolder } from "herdr";
+import { spaces, panes, run, exec, theme, props, closeOverlay, openOverlay, home, readTextFile, notify, pickFolder } from "herdr";
 import { projectsOf, pickRows } from "./model.js";
 
 const ORGS = [["ag", "AG"], ["cs", "CS"], ["personal", "PERSONAL"], ["other", "OTHER"]];
@@ -48,7 +50,8 @@ export default class SpacePicker extends View {
 
   rows() {
     const projects = this.org === "other" ? [] : projectsOf(this.org, this.dirs, this.catalog, this.root);
-    return pickRows(projects, this.filter);
+    const label = ORGS.find(([id]) => id === this.org)[1];
+    return pickRows(projects, this.filter, { org: this.org, label, root: this.root });
   }
 
   // The space already holding a project: named after it, or with a terminal in it.
@@ -65,6 +68,9 @@ export default class SpacePicker extends View {
 
   go(r, cx) {
     if (!r) return;
+    // Herdr's own "+": a plain terminal in the focused one's folder.
+    if (r.kind === "terminal") { this.close(); run("space.new"); return; }
+    if (r.kind === "root") { this.close(); run("space.new", { name: ORGS.find(([id]) => id === this.org)[1], folder: r.path, machine: "" }); return; }
     if (r.kind === "other") {
       this.close();
       pickFolder({ prompt: "Open a folder as a space" }).then((folder) => {
@@ -88,6 +94,13 @@ export default class SpacePicker extends View {
     else run("space.new", { name: p.name, folder: p.main, argv: ["claude"], machine: "" });
   }
 
+  // ⌘⏎ on a cloned project or worktree: the New worktree dialog for its repo.
+  newWorktree(r) {
+    if (!r?.project?.cloned) return;
+    this.close();
+    openOverlay({ mod: "worktree-ws", kind: "dialog", width: 560, height: 480, props: { folder: r.project.main, action: "new" } });
+  }
+
   setOrg(org, cx) {
     this.org = org;
     this.at = 0;
@@ -109,7 +122,8 @@ export default class SpacePicker extends View {
     const row = (r, i) => {
       const on = i === this.at;
       const off = r.project && !r.project.cloned;
-      const meta = r.kind === "other" ? "Finder" : r.kind === "worktree" ? "new tab"
+      const meta = r.kind === "other" ? "Finder" : r.kind === "terminal" ? "shell" : r.kind === "root" ? "shell · ~/mac-workspace/" + this.org
+        : r.kind === "worktree" ? "new tab"
         : off ? `not cloned · ws clone ${r.label}` : this.spaceOf(r.project) ? "space open" : "main";
       return h_flex().id(`sp-row-${i}`).min_h(r.kind === "worktree" ? 26 : 32).px(8).gap(9).flex_none().items_center().rounded(8)
         .when(r.kind === "worktree", (el) => el.pl(30))
@@ -133,6 +147,7 @@ export default class SpacePicker extends View {
         const k = e.key;
         const n = rows.length;
         if (k === "escape") return this.close();
+        if (k === "enter" && e.modifiers.platform) { cx.stop_propagation(); return this.newWorktree(rows[this.at]); }
         if (k === "down") this.at = (this.at + 1) % n;
         else if (k === "up") this.at = (this.at + n - 1) % n;
         else if (k === "tab") {
@@ -153,6 +168,6 @@ export default class SpacePicker extends View {
         .when(this.org === "other", (el) => el.child(div().px(8).py(6).text_size(12).text_color(t.dim).child("Folders outside mac-workspace: pick one below.")))
         .children(rows.map(row)))
       .child(h_flex().px(12).h(30).gap(14).flex_none().items_center().border_t(1).border_color(t.border).text_size(11).text_color(t.dim)
-        .child("↑↓ move").child("⏎ open").child("tab next organization").child("esc close"));
+        .child("↑↓ move").child("⏎ open").child("⌘⏎ new worktree").child("tab next org").child("esc close"));
   }
 }

@@ -24,3 +24,13 @@ test("a search keeps projects whose name or worktree matches, Other folder alway
   assert.deepEqual(pickRows(ps, "cart").map((r) => `${r.kind}:${r.label}`), ["project:shop", "worktree:fix-cart", "other:Other folder…"]);
   assert.deepEqual(pickRows(ps, "BLO").map((r) => r.label), ["blog", "Other folder…"]);
 });
+
+test("with an organization, New terminal and its root folder lead the rows while the search allows them", () => {
+  const ps = projectsOf("ag", dirs, catalog, R);
+  const top = { org: "ag", label: "AG", root: R };
+  assert.deepEqual(pickRows(ps, "", top).slice(0, 3).map((r) => `${r.kind}:${r.label}`), ["terminal:New terminal", "root:AG folder", "project:blog"]);
+  assert.equal(pickRows(ps, "", top)[1].path, `${R}/ag`);
+  assert.deepEqual(pickRows(ps, "cart", top).map((r) => r.kind), ["project", "worktree", "other"]);
+  assert.deepEqual(pickRows(ps, "folder", top).map((r) => r.kind), ["root", "other"]);
+  assert.deepEqual(pickRows([], "", { org: "other", label: "OTHER", root: R }).map((r) => r.kind), ["terminal", "other"]);
+});

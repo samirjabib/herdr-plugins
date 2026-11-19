@@ -26,10 +26,17 @@ export function projectsOf(org, dirs, catalog, root) {
 
 // The rows for a search (case-insensitive, on project and worktree names): a
 // project, then its worktrees (all of them when the project matches, else the
-// matching ones), and "Other folder…" last.
-export function pickRows(projects, query) {
+// matching ones), and "Other folder…" last. With `top` ({ org, label, root }),
+// "New terminal" (Herdr's plain new space) and the organization's root folder
+// (none for "other") lead, each while the search is empty or matches its label.
+export function pickRows(projects, query, top = null) {
   const q = (query ?? "").trim().toLowerCase();
   const rows = [];
+  const lead = (row) => { if (!q || row.label.toLowerCase().includes(q)) rows.push(row); };
+  if (top) {
+    lead({ kind: "terminal", label: "New terminal" });
+    if (top.org !== "other") lead({ kind: "root", label: `${top.label} folder`, path: `${top.root}/${top.org}` });
+  }
   for (const p of projects) {
     const hit = !q || p.name.toLowerCase().includes(q);
     const wts = hit ? p.worktrees : p.worktrees.filter((w) => w.name.toLowerCase().includes(q));
