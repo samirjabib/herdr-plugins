@@ -35,7 +35,24 @@ unset CLAUDE_ACCOUNTS_DIR
 # Inside Herdr, in a mac-workspace checkout, the session gets a name that tells
 # sessions apart at a glance (prompt box, /resume, Remote Control on the phone):
 #   <Mac> · <project> · <worktree, or main> · <account>
-# Not when a name is given by hand or for a print run.
+# Not when a name is given by hand or for a print run. A resumed session keeps
+# a name given with /rename (its transcript's last custom title) through a
+# switch; an automatic one is made again, so it names the new account.
+# Remote Control gets the same name, so the Claude app shows it too.
+
+# The last /rename of session $1, from its transcript in the shared projects
+# folder; nothing when it has none.
+renamed_title() {
+  for base in "${CLAUDE_CONFIG_DIR:-$HOME/.claude}" "$HOME/.claude"; do
+    for f in "$base"/projects/*/"$1".jsonl; do
+      [ -r "$f" ] || continue
+      grep -o '"customTitle":"\([^"\\]\|\\.\)*"' "$f" | tail -n 1 |
+        sed -e 's/^"customTitle":"//' -e 's/"$//' -e 's/\\"/"/g' -e 's/\\\\/\\/g'
+      return 0
+    done
+  done
+}
+
 session_name() {
   ws=$(cd "$HOME/mac-workspace" 2>/dev/null && pwd -P) || return 1
   here=$(pwd -P 2>/dev/null) || return 1
@@ -86,6 +103,34 @@ if [ -n "${HC_TERMINAL_ID:-}" ]; then
     case $a in -n|--name|--name=*|-p|--print|-v|--version|-h|--help) want=0 ;; esac
   done
   if [ "$want" = 1 ] && name=$(session_name) && [ -n "$name" ]; then
+    sid= prev=
+    for a in "$@"; do
+      case $prev in --resume|-r) sid=$a ;; esac
+      case $a in --resume=*) sid=${a#--resume=} ;; esac
+      prev=$a
+    done
+    if [ -n "$sid" ]; then
+      title=$(renamed_title "$sid")
+      # The automatic name is "<Mac> · <project> · <worktree>" plus an account.
+      d=" $(printf '\302\267') "
+      r=$name; auto=${r%%"$d"*}; r=${r#*"$d"}; auto="$auto$d${r%%"$d"*}"; r=${r#*"$d"}; auto="$auto$d${r%%"$d"*}"
+      case $title in
+        ""|"$auto"|"$auto$d"*) ;;
+        *) name=$title ;;
+      esac
+    fi
+    # A bare --remote-control (no name after it) takes the session's name.
+    rc=0
+    for a in "$@"; do
+      [ "$rc" = 0 ] && set --
+      if [ "$rc" = 2 ]; then
+        case $a in -*) set -- "$@" "$name" ;; esac
+      fi
+      rc=1
+      set -- "$@" "$a"
+      [ "$a" = --remote-control ] && rc=2
+    done
+    [ "$rc" = 2 ] && set -- "$@" "$name"
     set -- --name "$name" "$@"
   fi
 fi

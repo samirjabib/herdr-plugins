@@ -127,6 +127,50 @@ test("a switch's restart names the session after the account it switches to", as
   assert.equal(named(run(s, { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_DIR: "/profiles/b/home" }, ["--resume", "x"], undefined, cwd)), "mini · shop-app · main · Work Org");
 });
 
+// A transcript of session `sid` under the shared projects folder, its last
+// /rename being `title` (as Claude writes it).
+async function transcript(s, sid, ...titles) {
+  const dir = join(s.home, ".claude/projects/-ws-shop");
+  await mkdir(dir, { recursive: true });
+  const lines = [{ type: "user", sessionId: sid }, ...titles.map((customTitle) => ({ type: "custom-title", customTitle, sessionId: sid }))];
+  await writeFile(join(dir, `${sid}.jsonl`), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+}
+const argsOf = (r) => r.out.split("\n").filter((l) => l.startsWith("arg=")).map((l) => l.slice(4));
+
+test("a resumed session keeps a name given with /rename, through a switch", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/a/home\n" });
+  const cwd = await workspace(s, "ag/shop-app/main");
+  await transcript(s, "sid1", "mini · shop-app · main · dev", "Checkout bug \"v2\"");
+  const env = { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_DIR: "/profiles/b/home" };
+  assert.equal(named(run(s, env, ["--resume", "sid1"], undefined, cwd)), 'Checkout bug "v2"');
+  assert.equal(named(run(s, env, ["-r", "sid1"], undefined, cwd)), 'Checkout bug "v2"');
+});
+
+test("a resumed session whose name is the automatic one gets it again, with the new account", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/a/home\n" });
+  const cwd = await workspace(s, "ag/shop-app/main");
+  await transcript(s, "sid2", "mini · shop-app · main · dev");
+  assert.equal(named(run(s, { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_DIR: "/profiles/b/home" }, ["--resume", "sid2"], undefined, cwd)), "mini · shop-app · main · Work Org");
+});
+
+test("on System default (no account in the name) an old automatic name is made again too", async (t) => {
+  const s = await sandbox(t, { active: "\n" });
+  const cwd = await workspace(s, "ag/shop-app/main");
+  await transcript(s, "sid4", "mini · shop-app · main · Work Org");
+  assert.equal(named(run(s, { HC_TERMINAL_ID: "t1" }, ["--resume", "sid4"], undefined, cwd)), "mini · shop-app · main");
+});
+
+test("Remote Control carries the session's name, so the Claude app shows the same one", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/b/home\n" });
+  const cwd = await workspace(s, "ag/shop-app/main");
+  await transcript(s, "sid3", "Checkout bug");
+  const r = run(s, { HC_TERMINAL_ID: "t1" }, ["--remote-control", "--resume", "sid3"], undefined, cwd);
+  assert.deepEqual(argsOf(r), ["--name", "Checkout bug", "--remote-control", "Checkout bug", "--resume", "sid3"]);
+  // A Remote Control name given by hand stays.
+  const own = run(s, { HC_TERMINAL_ID: "t1" }, ["--remote-control", "phone", "--resume", "sid3"], undefined, cwd);
+  assert.deepEqual(argsOf(own), ["--name", "Checkout bug", "--remote-control", "phone", "--resume", "sid3"]);
+});
+
 test("a name given by hand, or a print run, is left alone", async (t) => {
   const s = await sandbox(t, { active: "/profiles/a/home\n" });
   const cwd = await workspace(s, "ag/shop-app/main");

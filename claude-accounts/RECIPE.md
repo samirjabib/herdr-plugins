@@ -193,8 +193,12 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
   `mini · shop-app · pre-order · Work Org` (Mac: its alias in
   `hosts/aliases.tsv`; account: its org, or its email's name for a personal org).
   The name shows in the prompt box, `/resume` and Remote Control on the phone,
-  and a switch's restart renames it after the new account. A name given by hand
-  (`-n`/`--name`) or a print run (`-p`) is left alone.
+  and a switch's restart renames it after the new account. A session renamed
+  with `/rename` keeps that name when it's resumed, a switch's restart
+  included (the launcher reads the transcript's last custom title). A bare
+  `--remote-control` gets the session's name, so the Claude app on the
+  desktop and the phone shows the same one. A name given by hand
+  (`-n`/`--name`, or after `--remote-control`) or a print run (`-p`) is left alone.
 - **Switching while Claude runs.**
   - Always restart: every Claude terminal on the previous account restarts
     on the new one, continuing its conversation. Ask: the switch dialog
