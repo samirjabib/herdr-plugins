@@ -307,7 +307,7 @@ code you don't know as a failure, as you read 1.
   in.
 - `active` (the active account's config folder, the exact string, empty for
   System default) is read by two outside readers, which take its first line
-  as is: a `claude` launcher script, which starts every new
+  as is: the `claude` launcher (`mods/claude-accounts/bin/claude`), which starts every new
   Claude in a Herdr terminal on it, and agent-sleep, which wakes a sleeping
   Claude on it (`claude-session.js`, `loadWakeAccount`). Writing anything
   but the exact folder on its first line breaks both. Other plugins read
