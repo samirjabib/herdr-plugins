@@ -5,7 +5,7 @@
 //   props: { view: "footer" }, or none
 //
 // Its copy is the one that always lives, so it also keeps (D1):
-// - the 15-minute timer, which runs `usage --json` (the CLI's cadence decides
+// - the 5-minute timer, which runs `usage --json` (the CLI's cadence decides
 //   what is due);
 // - the watch on the state folder: a batch with the root or live/ runs `usage
 //   --json` (it merges without fetching), any other only re-reads. Each wake
@@ -36,8 +36,9 @@ import {
   rememberAnchor, lastAnchor, reactState, applyReact, signInTab, withClosedAt, closedJustNow,
 } from "./footer-model.js";
 
-// D4: the timer polls every 15 minutes.
-const POLL = 15 * 60_000;
+// The timer polls every 5 minutes, so every account's numbers stay current
+// (the CLI's own floor keeps an account from being read more often).
+const POLL = 5 * 60_000;
 // A footer made before the app's window looks for it this often (D26).
 const WINDOW_LOOK = 250;
 // "3h 2m" moves once a minute.

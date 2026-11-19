@@ -12,7 +12,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { theme, openOverlay, closeOverlay, shared, setShared, settings } from "herdr";
 import { UsageView, readContract, claudeIcon, refreshButton, refreshIcon, usageBar, signInAccount } from "./footer.js";
 import { openAccounts } from "./accounts.js";
-import { UI_KEY, POPUP, usageMode, withUsageMode, popupModel, popupHeight, popupSpec, panelSpec, zoomOf, lastAnchor } from "./footer-model.js";
+import { UI_KEY, POPUP, usageMode, withUsageMode, popupModel, popupRowHeight, popupSpec, panelSpec, zoomOf, lastAnchor } from "./footer-model.js";
 
 const CHEVRON = "mods/workspace-chrome/chevron-right.svg";
 // The Claude row's left column, where its metrics line up (Orca's pl-[30px]).
@@ -30,7 +30,9 @@ export async function openPopup(anchor = lastAnchor()) {
 export default class Popup extends UsageView {
   init(p, cx) {
     this.setup(p);
-    if (this.overlay) this.follow(cx);
+    // Opening it reads every account again (the CLI skips one read too
+    // recently), so what it shows is current.
+    if (this.overlay) { this.follow(cx); this.refresh(cx); }
   }
 
   spec() {
@@ -67,7 +69,8 @@ export default class Popup extends UsageView {
       .child(this.header(m, t))
       .child(this.modes(m, t))
       .child(line(t))
-      .child(this.row(m.row, popupHeight(m), t))
+      .child(this.row(m.row, t, "active"))
+      .children(m.others.map((r) => this.row(r, t, r.id)))
       .child(line(t))
       .children(m.links.map((l) => this.link(l, t)));
   }
@@ -95,11 +98,11 @@ export default class Popup extends UsageView {
           .child(o.label))));
   }
 
-  // The Claude row (UsageRow): its height is what's left of popupHeight, so it
-  // holds in both modes.
-  row(r, total, t) {
-    const height = total - POPUP.header - POPUP.toggle - 2 - 2 * POPUP.link - POPUP.frame;
-    return v_flex().id("ca-popup-row").h(height).flex_none().px(14).gap(4).justify_center().cursor_pointer()
+  // An account's row (UsageRow): the active one first ("Claude" and its
+  // login), then each other account under its login. Its height is
+  // popupRowHeight's, so it holds in both modes.
+  row(r, t, key) {
+    return v_flex().id(key === "active" ? "ca-popup-row" : `ca-popup-row-${key}`).h(popupRowHeight(r)).flex_none().px(14).gap(4).justify_center().cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .on_click(() => this.leave(() => {
         if (r.signIn) signInAccount(r.signIn);
@@ -108,6 +111,7 @@ export default class Popup extends UsageView {
       .child(h_flex().h(20).flex_none().gap(10).items_center()
         .child(h_flex().size(20).flex_none().items_center().justify_center().rounded(6).border_1().border_color(t.border).bg(t.raised).child(claudeIcon(13)))
         .child(div().flex_none().text_size(13).font_medium().child(r.name))
+        .when(Boolean(r.account), (el) => el.child(div().min_w(0).truncate().text_size(11).text_color(t.muted).child(r.account)))
         .when(Boolean(r.status), (el) => el.child(div().min_w(0).truncate().text_size(11).text_color(t.muted).child(r.status)))
         .when(Boolean(r.reset), (el) => el.child(div().flex_none().text_size(11).text_color(t.muted).child(r.reset)))
         .child(div().flex_1().min_w(0))

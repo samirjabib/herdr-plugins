@@ -321,6 +321,22 @@ test("popover, Detailed: Usage · all agents · Detailed | Compact · Claude Res
   assert.deepEqual(m.links.map((l) => [l.id, l.label]), [["accounts", "Manage Accounts…"]]);
 });
 
+test("popover lists every saved account: the active one's row names its login, each other account has its own row and bars", () => {
+  const m = popupModel({ doc: DOC, mode: "verbose", now: NOW });
+  assert.equal(m.row.account, "ana@example.com");
+  assert.deepEqual(m.others.map((r) => [r.id, r.name, r.kind]), [[BEN, "ben@example.org", "usage"]]);
+  assert.deepEqual(m.others[0].metrics.map((x) => [x.label, x.text]), [["wk", "94%"], ["Fable", "42%"], ["30d", "12%"]]);
+  // System default, the Mac's own login, shows only while it's the active one.
+  const fromDefault = popupModel({ doc: docWith("default"), mode: "verbose", now: NOW });
+  assert.deepEqual(fromDefault.others.map((r) => r.name), ["ana@example.com", "ben@example.org"]);
+  // Compact: each other account keeps its tightest window as its headline.
+  assert.deepEqual(popupModel({ doc: DOC, mode: "compact", now: NOW }).others[0].headline, { label: "2d 3h", text: "94%", color: "blocked" });
+  // Each row adds its height, so the popover opens tall enough for all of them.
+  const alone = readAccounts({ version: 1, active: ANA, accounts: [DOC.accounts.find((a) => a.id === ANA)] });
+  assert.ok(popupHeight(m) > popupHeight(popupModel({ doc: alone, mode: "verbose", now: NOW })));
+  assert.deepEqual(popupModel({ doc: alone, mode: "verbose", now: NOW }).others, []);
+});
+
 test("popover, Compact: the row's tightest window on its right, no bars", () => {
   const m = popupModel({ doc: DOC, mode: "compact", now: NOW });
   assert.deepEqual(m.modes.map((x) => x.selected), [false, true]);
@@ -906,7 +922,7 @@ test("footer view (D26): made before the window, as when Herdr opens on a layout
   assert.equal(look.cancelled, true, "it stops looking");
   assert.deepEqual(world.execs, [["usage", "--json"]]);
   assert.equal(world.watches.length, 1);
-  assert.deepEqual(world.timers.slice(1).map((x) => x.ms).sort((a, b) => a - b), [60_000, 900_000]);
+  assert.deepEqual(world.timers.slice(1).map((x) => x.ms).sort((a, b) => a - b), [60_000, 300_000]);
   // A late tick of the look starts nothing twice.
   look.fire();
   await flush();
@@ -992,11 +1008,11 @@ test("footer view (D1): works with T1's stub of toasts.react, whose result is em
   assert.deepEqual(applyReact(stub, reactState({ doc: DOC, restart: null, pending: null, link: null, now: NOW }), {}), { notify: [], openConfirm: false, copyLink: null, seen: null });
 });
 
-test("footer view (D1, D4): starts with one merge, and its timers are the 15 minutes and the countdown's minute", async () => {
+test("footer view (D1, D4): starts with one merge, and its timers are the 5 minutes and the countdown's minute", async () => {
   const { world } = await footer();
   assert.deepEqual(world.execs, [["usage", "--json"]]);
-  assert.deepEqual(world.timers.map((t) => t.ms).sort((a, b) => a - b), [60_000, 15 * 60_000]);
-  world.timers.find((t) => t.ms === 15 * 60_000).fire();
+  assert.deepEqual(world.timers.map((t) => t.ms).sort((a, b) => a - b), [60_000, 5 * 60_000]);
+  world.timers.find((t) => t.ms === 5 * 60_000).fire();
   await flush();
   assert.deepEqual(world.execs, [["usage", "--json"], ["usage", "--json"]]);
   const before = world.notifies;
@@ -1138,7 +1154,7 @@ async function popup(text = liveDoc(), mode = "verbose") {
 test("popover view (S1): Usage · all agents · refresh · Detailed | Compact · Claude Resets in 3h 2m · 5h wk Fable · its link", async () => {
   const { view } = await popup();
   const root = view.render();
-  assert.equal(textOf(root), "Usage all agents Detailed Compact Claude Resets in 3h 2m 5h 41% wk 65% Fable 22% Manage Accounts…");
+  assert.equal(textOf(root), "Usage all agents Detailed Compact Claude ana@example.com Resets in 3h 2m 5h 41% wk 65% Fable 22% ben@example.org Resets in 4d 6h wk 94% Fable 42% Manage Accounts…");
   assert.ok(find(root, "ca-popup-refresh"));
   assert.equal(find(root, "ca-popup-mode-verbose").calls.tooltip[0], "Full usage with bars, labels, and percentages");
   assert.ok(find(root, "ca-popup-mode-verbose").calls.font_medium, "Detailed is selected");
@@ -1147,12 +1163,19 @@ test("popover view (S1): Usage · all agents · refresh · Detailed | Compact ·
   assert.equal(withText(root, "41%").calls.text_color[0], "#foreground");
 });
 
+test("popover view: opening it reads every account's usage again", async () => {
+  const { world } = await popup();
+  await flush();
+  assert.deepEqual(world.execs.map((x) => x[0]), ["usage"]);
+  assert.ok(world.execs[0].includes("--refresh"));
+});
+
 test("popover view: Detailed | Compact sets the footer's mode, and the row draws its headline", async () => {
   const { view, world } = await popup();
   find(view.render(), "ca-popup-mode-compact").handlers.click({}, world.cx);
   assert.deepEqual(world.shared.get(UI_KEY), { usageMode: "compact" });
   const text = textOf(view.render());
-  assert.match(text, /Claude 4d 6h 65%/);
+  assert.match(text, /Claude ana@example\.com 4d 6h 65% ben@example\.org 4d 6h 94%/);
   assert.doesNotMatch(text, /Resets in/);
 });
 
@@ -1170,7 +1193,7 @@ test("popover view: the Claude row opens the panel where it was, then it closes;
 test("popover view, signed out: the row says not signed in, and a click opens the login in a tab", async () => {
   const { view, world } = await popup(liveDoc("default"));
   const root = view.render();
-  assert.match(textOf(root), /Claude not signed in Sign in/);
+  assert.match(textOf(root), /Claude System default not signed in Sign in/);
   find(root, "ca-popup-row").handlers.click({}, world.cx);
   assert.deepEqual(world.tabs(), [{ name: "Claude sign-in", argv: [CLI, "login", "default"] }]);
   assert.deepEqual(world.opened(), []);

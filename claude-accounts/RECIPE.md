@@ -32,9 +32,11 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
     in the Claude Console. Signed out, it says "Sign in to see usage".
   - Click it for the popover; click again to close it.
 - **Popover** (above the footer): `Usage`, a refresh button and a
-  `Detailed | Compact` toggle for the footer. Then the `Claude` row with
-  "Resets in 3h 2m" and its `5h`, `wk` and `Fable` bars (it opens the
-  panel) and `Manage Accounts…`.
+  `Detailed | Compact` toggle for the footer. Then the `Claude` row with the
+  active login, "Resets in 3h 2m" and its `5h`, `wk` and `Fable` bars (it
+  opens the panel), one row like it for each other saved account (System
+  default only while it's the active one), and `Manage Accounts…`. Opening
+  it reads every account's usage again.
 - **Claude panel:** "Claude · Updated 3m ago" (or "Not yet updated"). The
   active account's card: Session, Weekly and Fable, each "N% used · Resets
   in …", plus the monthly spend and credits when the account has them. Then
@@ -148,7 +150,7 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
     back to System default.
 - **Usage.**
   - Each account's limits come from Claude's usage endpoint, with its own
-    login. It's asked every 15 minutes, at most every 5 minutes per account
+    login. It's asked every 5 minutes and each time the popover opens, at most every 5 minutes per account
     (30 seconds with refresh, 60 for accounts that aren't active), less often
     after failures, and not before a rate limit's Retry-After.
   - Between polls, the numbers follow every Claude turn: Claude Code hands
@@ -161,7 +163,7 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
     and it's read again. A folder holding someone else's login isn't read at
     all, and its statusline drops are ignored.
 - **Switching on its own** (the setting On).
-  - Every `usage` run (the 15-minute poll and each Claude turn's merge)
+  - Every `usage` run (the 5-minute poll and each Claude turn's merge)
     checks the active account after its reads. When its 5-hour or weekly
     window is at 95% or more, it switches to the eligible account with the
     most room left (95 minus its most used of the two), through `use`'s own
@@ -269,7 +271,7 @@ scripts/install.sh claude-accounts
 - **Mod `mods/claude-accounts/`** (`mod.json` `{ "place": "none" }`), one mod
   in views picked by `props.view`:
   - none or `footer` = `footer.js`: the copy that reads key commands. It
-    also keeps the 15-minute timer and the watch on the state folder, and
+    also keeps the 5-minute timer and the watch on the state folder, and
     turns the CLI's progress into toasts (`toasts.js`).
   - `status` = `status.js`: Herdr's bottom status bar (machine, branch,
     agents, the palette hint) with the usage before the hint. It is the

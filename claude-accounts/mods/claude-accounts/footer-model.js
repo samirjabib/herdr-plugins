@@ -310,7 +310,7 @@ export function footerModel({ doc, mode = "verbose", width, now = Date.now() } =
 }
 
 // ── The popover ────────────────────────────────────────────────────────────
-// popupModel → { title, scope, refreshTip, modes, row, links }
+// popupModel → { title, scope, refreshTip, modes, row, others, links }
 //   modes  [{ value, label, tooltip, selected }]
 //   row    the Claude row (UsageRow): { name, kind, status, signIn, reset,
 //          headline, metrics, lines }. With numbers: Detailed has "Resets in
@@ -319,7 +319,11 @@ export function footerModel({ doc, mode = "verbose", width, now = Date.now() } =
 //          { label, text, color }. Without: kind and status are Orca's row
 //          state (usage-roster-row-state.ts), signIn the account to sign in.
 //          lines: how many lines the Detailed metrics take (four windows
-//          wrap at this width), in both modes, for the height.
+//          wrap at this width), in both modes, for the height. account:
+//          the active login's label, beside the name.
+//   others every other saved account as its own row, in the file's order,
+//          with name its login and id; System default only while it's the
+//          active one (the panel's rule, S10).
 
 export const REFRESH_TIP = "Refresh rate limits";
 const LINKS = Object.freeze([
@@ -358,12 +362,18 @@ function usageRow(account, mode, now) {
 
 export function popupModel({ doc, mode = "verbose", now = Date.now() } = {}) {
   const m = mode === "compact" ? "compact" : "verbose";
+  const active = activeAccount(doc);
+  const accounts = Array.isArray(doc?.accounts) ? doc.accounts : [];
+  const others = accounts
+    .filter((a) => a.id !== active?.id && !a.isDefault)
+    .map((a) => ({ ...usageRow(a, m, now), id: a.id, name: accountLabel(a), account: null }));
   return {
     title: "Usage",
     scope: "all agents",
     refreshTip: REFRESH_TIP,
     modes: MODES.map((x) => ({ ...x, selected: x.value === m })),
-    row: usageRow(activeAccount(doc), m, now),
+    row: { ...usageRow(active, m, now), account: active ? accountLabel(active) : null },
+    others,
     links: LINKS,
   };
 }
@@ -491,9 +501,13 @@ export const PANEL = Object.freeze({
 
 // The Claude row with numbers keeps one height in both modes: Detailed |
 // Compact is toggled inside the open popover, which can't change its size.
+export function popupRowHeight(r) {
+  return r?.kind === "usage" ? POPUP.rowUsage + (r.lines - 1) * POPUP.rowLine : POPUP.row;
+}
+
 export function popupHeight(m) {
-  const row = m?.row?.kind === "usage" ? POPUP.rowUsage + (m.row.lines - 1) * POPUP.rowLine : POPUP.row;
-  return POPUP.header + POPUP.toggle + 1 + row + 1 + 2 * POPUP.link + POPUP.frame;
+  const others = sum((m?.others ?? []).map(popupRowHeight));
+  return POPUP.header + POPUP.toggle + 1 + popupRowHeight(m?.row) + others + 1 + 2 * POPUP.link + POPUP.frame;
 }
 
 // A notice's message, in lines of the card's width.

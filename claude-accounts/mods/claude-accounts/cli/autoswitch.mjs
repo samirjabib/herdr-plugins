@@ -37,8 +37,8 @@ import { knownAccounts, readSettings, sameEmail, switchAccount } from "./account
 import { join } from "node:path";
 
 export const SWITCH_LINE = 95;
-// Every account is read at least every 15 minutes (the footer's poll): two
-// polls without a read is stale.
+// Every account is read at least every 5 minutes (the footer's poll); 30
+// minutes without a read is stale.
 export const FRESH_MS = 30 * 60_000;
 const FUTURE_SKEW_MS = 60_000;
 const WINDOWS = ["session", "weekly"];

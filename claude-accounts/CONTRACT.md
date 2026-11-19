@@ -26,7 +26,7 @@ change without notice.
 - It's rewritten only when something in it changes, and `updatedAt` moves
   only then. Watching the folder doesn't loop when you run the CLI from the
   watch.
-- It's refreshed by the plugin's footer every 15 minutes, after every Claude
+- It's refreshed by the plugin's footer every 5 minutes and when its popover opens, after every Claude
   turn (the statusline's live limits), and whenever the accounts change. Run
   `claude-accounts usage --refresh --json` for a fresh read.
 - Missing means the plugin never ran: `claude-accounts list --json` creates
