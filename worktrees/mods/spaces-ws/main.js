@@ -106,7 +106,8 @@ export default class Spaces extends View {
 
   // A click: a project in several spaces is gathered into one grid first.
   open(r, cx) {
-    if (!needsGather(r) || this.gathering) return run("space.select", { id: clickTarget(r).id });
+    // Gathering moves other sessions; it runs only when asked (herdr-grid project), never on a click.
+    return run("space.select", { id: clickTarget(r).id });
     this.gathering = true;
     notify({ title: `${r.name}: gathering ${r.spaces.length} spaces into one grid…` });
     cx.spawn(async (cx) => {
