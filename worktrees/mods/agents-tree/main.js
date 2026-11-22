@@ -162,7 +162,8 @@ export default class Agents extends View {
       } catch {} // core down: keep the last colors
     };
     cx.spawn(colors);
-    cx.timer.every(10000, (cx) => cx.spawn(colors));
+    // Colors change rarely: once a minute is enough, and the core only reads one small file.
+    cx.timer.every(60000, (cx) => cx.spawn(colors));
   }
 
   // Stamps agents whose state changed. Done and idle count as one: looking at a
