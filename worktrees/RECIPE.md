@@ -60,20 +60,18 @@ go to sleep and come back where they were.
   Claudes end and resume with `claude --resume` when you show the space again,
   its tabs and splits stay, and other programs in front (dev servers) are
   stopped too.
-- **Agents list** (`agents-ws`, a copy of Herdr's `agents`). Agents look and
-  sort as before, with:
-  - Claudes with a pane that haven't reported a status yet (a resumed one),
-    which Herdr leaves out, so their sub-agents nest instead of showing loose;
-  - the name a terminal was given (`hc run --name orch-1`) instead of a tab
-    number;
-  - a gold `★` on the main orchestrator: an agent whose program runs in a
-    project's main checkout on main (looked at every 10 s);
-  - background processes an agent started with `hc run` (watchers, jobs, dev
-    servers) under it, at any depth, with a `▸` and `running`, `✓ <age>` or
-    `exit <code>`. Click one for its last 40 lines in a popup. Finished ones
-    leave after 5 minutes; failed ones stay until opened once;
-  - Background: processes whose agent has ended (`--outlive-parent`), under
-    their project's space by folder, else in a group of their own.
+- **Agents list** (`agents-tree`, a copy of Herdr's `agents` that keeps its look).
+  Two additions:
+  - each orchestrator wears a tag for where it runs: `⑂ main` (a project's
+    main checkout), `⑂ <worktree>`, or `📁 root` / `📁 <group> root` (the
+    workspace root, `~/mac-workspace/<group>`);
+  - processes an orchestrator starts somewhere else (main or a worktree) sit
+    one level deeper, under a row naming that place; ones started where it runs
+    stay at the first level, as Herdr draws them.
+  Finished processes leave the list at once, as in Herdr's own. `agents-ws`
+  (the earlier copy with the gold `★`, finished processes kept a while and
+  orphan processes grouped by project) stays installable; the layout no longer
+  uses it.
 - **Clean up** (the switcher's "Clean up…" button, `ctrl-d` there, or the space
   menu). Every linked checkout with its size and age, and badges: "in main"
   (its branch is merged: a merged PR from it, which catches squash merges, or
@@ -93,7 +91,7 @@ go to sleep and come back where they were.
 - **The layout** (`main-accounts`): Herdr's default with claude-accounts' usage
   and agent-sleep's moon (its popup: Sleep now, Wake all, automatic sleep, off
   until turned on) in the status bar, the sidebar's spaces from `spaces-ws`,
-  the Agents list from `agents-ws`, pane headers from `pane-branch`, and the
+  the Agents list from `agents-tree`, pane headers from `pane-branch`, and the
   Files and Changes panels from `files-ws` and `changes-ws`. `requires`
   installs claude-accounts and agent-sleep first.
 
