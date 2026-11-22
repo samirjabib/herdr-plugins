@@ -52,8 +52,14 @@ const SEATS = ["workspace", "cs", "ag", "personal"];
 // Space avatar colors (spaces-ws MARK: the same in every mod that draws space avatars).
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
 
-// The color Samir picked for an org's space (the space at ~/mac-workspace/<org>), else null.
+// The mac-workspace core (console server); it serves the app's picks at /api/colors.
+const CORE = "http://127.0.0.1:4317";
+
+// An org's color: the one picked in the mac-workspace app (via the core), else the color of
+// its space here (the space at ~/mac-workspace/<org>), else null.
 function orgColor(org) {
+  const picked = (shared("workspace.colors") ?? {})[org];
+  if (/^#[0-9a-f]{6}$/.test(picked ?? "")) return picked;
   const sp = spaces().find((x) => new RegExp(`/mac-workspace/${org}/?$`).test(x.folder ?? x.cwd ?? ""));
   return sp ? MARK[(shared("space.colors") ?? {})[sp.id]] ?? null : null;
 }
@@ -143,6 +149,20 @@ export default class Agents extends View {
     if (!this.pendingPins.length) localStorage.removeItem("pins");
     this.migratingPins = new Set();
     cx.timer.every(30000, (cx) => cx.notify());
+    // The org colors picked in the mac-workspace app, through its core (the bridge between the
+    // two apps): shared as "workspace.colors" so every mod can paint an org the same way.
+    const colors = async (cx) => {
+      try {
+        const r = await fetch(`${CORE}/api/colors`);
+        const got = r.ok ? (await r.json())?.colors ?? {} : null;
+        if (got && JSON.stringify(got) !== JSON.stringify(shared("workspace.colors") ?? {})) {
+          setShared("workspace.colors", got);
+          cx.notify();
+        }
+      } catch {} // core down: keep the last colors
+    };
+    cx.spawn(colors);
+    cx.timer.every(10000, (cx) => cx.spawn(colors));
   }
 
   // Stamps agents whose state changed. Done and idle count as one: looking at a
