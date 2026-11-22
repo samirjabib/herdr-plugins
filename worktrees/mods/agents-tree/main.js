@@ -35,6 +35,11 @@ function rootOf(dir) {
   return m ? m[1] ?? "workspace" : null;
 }
 
+// The org of a mac-workspace orchestrator (`ws orchestrator start <org>` names it orch-<org>), else null.
+function orchOf(name) {
+  return /^orch-(cs|ag|personal)$/.exec(name ?? "")?.[1] ?? null;
+}
+
 function toggleSidebar() {
   const width = find(layout(), "sidebar")?.size?.px;
   if (!narrow()) setShared("sidebar.width", width);
@@ -259,6 +264,8 @@ export default class Agents extends View {
         .when(l === "└" || l === "├", el => el.border_b(1.5).rounded_bl(6))))
       .when(Boolean(pic), el => el.child(div().mr(8).child(pic)))
       .child(div().flex_1().truncate().text_color(on ? t.foreground : t.muted).child(k.name || k.template || k.program?.name || k.address))
+      .when(Boolean(orchOf(k.name)), el => el.child(div().flex_none().mr(6).px(5).h(16).rounded(4).flex().items_center().text_size(10.5).font_semibold()
+        .bg(t.accent).text_color(t.background).child("◆ orchestrator")))
       .child(this.status(t, { status: st }, compact));
   }
 
@@ -359,7 +366,8 @@ export default class Agents extends View {
       const machine = a.address.includes("/") ? a.address.split("/")[0] : null;
       const dir = all.find((x) => x.address === a.address)?.cwd ?? a.cwd;
       const where = placeOf(dir);
-      const root = where ? null : rootOf(dir);
+      const orch = orchOf(all.find((x) => x.address === a.address)?.name);
+      const root = where || orch ? null : rootOf(dir);
       if (collapsed) {
         return h_flex()
           .id(`ag-${a.address}`)
@@ -422,6 +430,10 @@ export default class Agents extends View {
           })).child(pic)))
         .child(h_flex().flex_1().min_w(0).gap(5).items_center()
           .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
+          .when(Boolean(orch), el => el.child(h_flex().flex_none().gap(3).px(5).h(16).rounded(4).items_center().text_size(10.5).font_semibold()
+            .bg(t.accent).text_color(t.background)
+            .tooltip(`mac-workspace orchestrator of ${orch}: one long-lived Claude at ~/mac-workspace/${orch} (ws orchestrator start ${orch})`)
+            .child(`◆ ${orch === "personal" ? "personal" : orch.toUpperCase()} orchestrator`)))
           .when(Boolean(where), el => el.child(h_flex().flex_none().gap(3).px(5).h(16).rounded(4).items_center().text_size(10.5)
             .bg((where === "main" ? t.accent : t.dim) + "1f").text_color(where === "main" ? t.accent : t.muted)
             .tooltip(where === "main" ? "Runs in the main checkout" : `Runs in worktree ${where}`)

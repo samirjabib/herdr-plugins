@@ -68,6 +68,8 @@ go to sleep and come back where they were.
   - processes an orchestrator starts somewhere else (main or a worktree) sit
     one level deeper, under a row naming that place; ones started where it runs
     stay at the first level, as Herdr draws them.
+  A mac-workspace orchestrator (`orch-<org>`, from `ws orchestrator start`) wears
+  a solid `◆ <ORG> orchestrator` tag instead.
   Finished processes leave the list at once, as in Herdr's own. `agents-ws`
   (the earlier copy with the gold `★`, finished processes kept a while and
   orphan processes grouped by project) stays installable; the layout no longer
