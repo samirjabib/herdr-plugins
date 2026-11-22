@@ -37,7 +37,7 @@ function rootOf(dir) {
 
 // The org of a mac-workspace orchestrator (`ws orchestrator start <org>` names it orch-<org>), else null.
 function orchOf(name) {
-  return /^orch-(cs|ag|personal)$/.exec(name ?? "")?.[1] ?? null;
+  return /^orch-(workspace|cs|ag|personal)$/.exec(name ?? "")?.[1] ?? null;
 }
 
 // The organization of a folder under ~/mac-workspace (spaces-ws orgOf), else "other".
@@ -45,13 +45,18 @@ function orgOfDir(dir) {
   return /\/mac-workspace\/(ag|cs|personal)\//.exec(`${dir ?? ""}/`)?.[1] ?? "other";
 }
 
-const ORG_LABEL = { cs: "CS", ag: "AG", personal: "Personal" };
+const ORG_LABEL = { workspace: "Workspace", cs: "CS", ag: "AG", personal: "Personal" };
+// Top to bottom: the Workspace Boss, then each org's supervisor.
+const SEATS = ["workspace", "cs", "ag", "personal"];
 
-// The WORKSPACE ORCHESTRATOR tag; quiet when the orchestrator is off.
+// The seat's tag: WORKSPACE BOSS for the top one, WORKSPACE ORCHESTRATOR for the org supervisors;
+// quiet when it is off.
 function orchTag(t, off, org) {
+  const boss = org === "workspace";
+  const fill = boss ? (t.warning ?? t.blocked) : t.accent;
   return h_flex().id(`orch-tag-${org}-${off}`).flex_none().px(5).h(16).rounded(4).items_center().text_size(10).font_bold()
-    .bg(off ? t.dim + "26" : t.accent).text_color(off ? t.dim : t.background)
-    .child("WORKSPACE ORCHESTRATOR");
+    .bg(off ? t.dim + "26" : fill).text_color(off ? t.dim : t.background)
+    .child(boss ? "WORKSPACE BOSS" : "WORKSPACE ORCHESTRATOR");
 }
 
 function toggleSidebar() {
@@ -313,7 +318,8 @@ export default class Agents extends View {
     // The organization the Spaces list shows (spaces-ws): ALL, or only that org's agents.
     const org = shared("spaces.org") ?? "all";
     const cwdOf = (a) => all.find((x) => x.address === a.address)?.cwd ?? a.cwd;
-    if (org !== "all") list = list.filter((a) => orgOfDir(cwdOf(a)) === org);
+    const isBoss = (a) => all.find((x) => x.address === a.address)?.name === "orch-workspace";
+    if (org !== "all") list = list.filter((a) => isBoss(a) || orgOfDir(cwdOf(a)) === org);
     const tabCounts = new Map();
     for (const a of list) tabCounts.set(a.tab, (tabCounts.get(a.tab) ?? 0) + 1);
     const byPriority = sort.id === "priority";
@@ -448,7 +454,7 @@ export default class Agents extends View {
           })).child(pic)))
         .child(h_flex().flex_1().min_w(0).gap(5).items_center()
           .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
-          .when(Boolean(orch), el => el.child(orchTag(t, false, orch).tooltip(`mac-workspace's ${orch} orchestrator: one long-lived Claude at ~/mac-workspace/${orch} (ws orchestrator start ${orch})`)))
+          .when(Boolean(orch), el => el.child(orchTag(t, false, orch).tooltip(orch === "workspace" ? "The Workspace Boss: talks with you, classifies and routes to the org supervisors (ws orchestrator start workspace)" : `mac-workspace's ${orch} supervisor: one long-lived Claude at ~/mac-workspace/${orch} (ws orchestrator start ${orch})`)))
           .when(Boolean(where), el => el.child(h_flex().flex_none().gap(3).px(5).h(16).rounded(4).items_center().text_size(10.5)
             .bg((where === "main" ? t.accent : t.dim) + "1f").text_color(where === "main" ? t.accent : t.muted)
             .tooltip(where === "main" ? "Runs in the main checkout" : `Runs in worktree ${where}`)
@@ -469,7 +475,7 @@ export default class Agents extends View {
     // space are next to each other in agents(), so neighbours make a group.
     // mac-workspace's own orchestrators (orch-<org>) get a section of their own, first.
     const orchName = (a) => orchOf(all.find((x) => x.address === a.address)?.name);
-    const workspace = rest.filter((a) => orchName(a));
+    const workspace = rest.filter((a) => orchName(a)).sort((x, y) => SEATS.indexOf(orchName(x)) - SEATS.indexOf(orchName(y)));
     const groups = [{ id: "workspace", label: "Workspace agents", status: null, members: workspace }];
     if (pinned.length) groups.push({ id: "pinned", label: "Pinned", status: null, members: pinned });
     for (const a of rest.filter((a) => !orchName(a))) {
@@ -524,8 +530,11 @@ export default class Agents extends View {
     const rows = collapsed
       ? list.flatMap(withKids)
       : groups.flatMap((g) => [header(g), ...(this.folded.has(g.id) ? [] : [
-        ...g.members.flatMap(withKids),
-        ...(g.id === "workspace" ? ["cs", "ag", "personal"].filter((o) => !live.has(o) && (org === "all" || o === org)).map(offRow) : []),
+        ...(g.id !== "workspace" ? g.members.flatMap(withKids) : SEATS.flatMap((o, i) => {
+          const a = g.members.find((m) => orchName(m) === o);
+          if (a) return withKids(a, i);
+          return o === "workspace" || org === "all" || o === org ? [offRow(o)] : [];
+        })),
       ])]);
 
     return v_flex()
