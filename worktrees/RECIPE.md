@@ -71,6 +71,8 @@ go to sleep and come back where they were.
   A mac-workspace orchestrator (`orch-<org>`, from `ws orchestrator start`) wears
   a solid `WORKSPACE ORCHESTRATOR` tag and sits in a "Workspace agents" section
   at the top, one row per org (cs, ag, personal), quiet and "off" when not running.
+  The list follows the Spaces org filter (ALL / AG / CS / PERSONAL): spaces-ws shares
+  it as `spaces.org`.
   Finished processes leave the list at once, as in Herdr's own. `agents-ws`
   (the earlier copy with the gold `★`, finished processes kept a while and
   orphan processes grouped by project) stays installable; the layout no longer

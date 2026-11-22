@@ -73,6 +73,7 @@ export default class Spaces extends View {
     // Organization tabs: which one is shown ("all" or an ORGS id), and whether the
     // bar shows at all (click "Spaces" to hide it; hidden lists every space).
     this.org = localStorage.getItem("spaces.org") ?? "all";
+    setShared("spaces.org", this.org);
     this.tabsShown = localStorage.getItem("spaces.tabs") !== "off";
     this.lastActive = null;
     this.refreshMachines(cx);
@@ -296,6 +297,8 @@ export default class Spaces extends View {
   setOrg(org) {
     this.org = org;
     try { localStorage.setItem("spaces.org", org); } catch {}
+    // The Agents list (agents-tree) follows the same organization.
+    setShared("spaces.org", org);
   }
 
   // ALL, then each organization with spaces (and the shown one): its count, and a

@@ -40,6 +40,11 @@ function orchOf(name) {
   return /^orch-(cs|ag|personal)$/.exec(name ?? "")?.[1] ?? null;
 }
 
+// The organization of a folder under ~/mac-workspace (spaces-ws orgOf), else "other".
+function orgOfDir(dir) {
+  return /\/mac-workspace\/(ag|cs|personal)\//.exec(`${dir ?? ""}/`)?.[1] ?? "other";
+}
+
 const ORG_LABEL = { cs: "CS", ag: "AG", personal: "Personal" };
 
 // The WORKSPACE ORCHESTRATOR tag; quiet when the orchestrator is off.
@@ -305,6 +310,10 @@ export default class Agents extends View {
     // it, it gets no row of its own, unless it's pinned.
     const nested = new Set(collapsed ? [] : list.flatMap((a) => this.tree(all, a.address).map((s) => s.t.address)));
     list = list.filter((a) => a.pinned || !nested.has(a.address));
+    // The organization the Spaces list shows (spaces-ws): ALL, or only that org's agents.
+    const org = shared("spaces.org") ?? "all";
+    const cwdOf = (a) => all.find((x) => x.address === a.address)?.cwd ?? a.cwd;
+    if (org !== "all") list = list.filter((a) => orgOfDir(cwdOf(a)) === org);
     const tabCounts = new Map();
     for (const a of list) tabCounts.set(a.tab, (tabCounts.get(a.tab) ?? 0) + 1);
     const byPriority = sort.id === "priority";
@@ -516,7 +525,7 @@ export default class Agents extends View {
       ? list.flatMap(withKids)
       : groups.flatMap((g) => [header(g), ...(this.folded.has(g.id) ? [] : [
         ...g.members.flatMap(withKids),
-        ...(g.id === "workspace" ? ["cs", "ag", "personal"].filter((o) => !live.has(o)).map(offRow) : []),
+        ...(g.id === "workspace" ? ["cs", "ag", "personal"].filter((o) => !live.has(o) && (org === "all" || o === org)).map(offRow) : []),
       ])]);
 
     return v_flex()
