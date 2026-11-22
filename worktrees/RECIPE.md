@@ -70,7 +70,8 @@ go to sleep and come back where they were.
     stay at the first level, as Herdr draws them.
   A mac-workspace orchestrator (`orch-<org>`, from `ws orchestrator start`) wears
   a quiet `workspace orchestrator` tag; the Workspace Boss (`orch-workspace`) a
-  `workspace boss` one, first and under every org filter. They sit in a "Workspace agents" section
+  `workspace boss` one, first and under every org filter, with the supervisors
+  hanging under it on tree lines (it gives them their orders). They sit in a "Workspace agents" section
   at the top, one row per org (cs, ag, personal), quiet and "off" when not running.
   The list follows the Spaces org filter (ALL / AG / CS / PERSONAL): spaces-ws shares
   it as `spaces.org`.

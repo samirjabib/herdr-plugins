@@ -532,11 +532,23 @@ export default class Agents extends View {
     const rows = collapsed
       ? list.flatMap(withKids)
       : groups.flatMap((g) => [header(g), ...(this.folded.has(g.id) ? [] : [
-        ...(g.id !== "workspace" ? g.members.flatMap(withKids) : SEATS.flatMap((o, i) => {
-          const a = g.members.find((m) => orchName(m) === o);
-          if (a) return withKids(a, i);
-          return o === "workspace" || org === "all" || o === org ? [offRow(o)] : [];
-        })),
+        ...(g.id !== "workspace" ? g.members.flatMap(withKids) : (() => {
+          const seat = (o, i) => {
+            const a = g.members.find((m) => orchName(m) === o);
+            if (a) return withKids(a, i);
+            return o === "workspace" || org === "all" || o === org ? [offRow(o)] : [];
+          };
+          // The Workspace Boss gives the orders: its supervisors hang under it, with tree lines.
+          const subs = SEATS.slice(1).map((o, i) => seat(o, i + 1)).filter((els) => els.length);
+          return [...seat("workspace", 0), ...subs.map((els, i) => {
+            const last = i === subs.length - 1;
+            return h_flex().id(`seat-branch-${i}`).items_stretch().pl(16)
+              .child(v_flex().w(9).mr(2).flex_none()
+                .child(div().mt(-4).h(19).border_l(1.5).border_b(1.5).rounded_bl(6).border_color(t.input))
+                .when(!last, (el) => el.child(div().flex_1().border_l(1.5).border_color(t.input))))
+              .child(v_flex().flex_1().min_w(0).children(els));
+          })];
+        })()),
       ])]);
 
     return v_flex()
