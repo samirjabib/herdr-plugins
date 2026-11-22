@@ -49,16 +49,25 @@ const ORG_LABEL = { workspace: "Workspace", cs: "CS", ag: "AG", personal: "Perso
 // Top to bottom: the Workspace Boss, then each org's supervisor.
 const SEATS = ["workspace", "cs", "ag", "personal"];
 
-// The seat's tag, as quiet as the place tags: "workspace boss" (amber, layers) for the top one,
-// "workspace orchestrator" (accent, folder: it runs at its org's root) for the supervisors;
-// grey when it is off.
+// Space avatar colors (spaces-ws MARK: the same in every mod that draws space avatars).
+const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
+
+// The color Samir picked for an org's space (the space at ~/mac-workspace/<org>), else null.
+function orgColor(org) {
+  const sp = spaces().find((x) => new RegExp(`/mac-workspace/${org}/?$`).test(x.folder ?? x.cwd ?? ""));
+  return sp ? MARK[(shared("space.colors") ?? {})[sp.id]] ?? null : null;
+}
+
+// The seat's tag, quiet: "workspace boss" (amber, layers) for the top one; for a supervisor
+// just "orchestrator" in its org's space color (the section already says workspace).
+// Fainter when it is off.
 function orchTag(t, off, org) {
   const boss = org === "workspace";
-  const color = off ? t.dim : boss ? (t.warning ?? t.blocked) : t.accent;
+  const color = boss ? (t.warning ?? t.blocked) : orgColor(org) ?? t.accent;
   return h_flex().id(`orch-tag-${org}-${off}`).flex_none().gap(3).px(5).h(16).rounded(4).items_center().text_size(10.5)
-    .bg(color + (off ? "14" : "1f")).text_color(color)
-    .child(svg(`mods/workspace-chrome/${boss ? "layers" : "folder"}.svg`).size(10).flex_none())
-    .child(boss ? "workspace boss" : "workspace orchestrator");
+    .bg(color + (off ? "10" : "1f")).text_color(off ? color + "99" : color)
+    .when(boss, (el) => el.child(svg("mods/workspace-chrome/layers.svg").size(10).flex_none()))
+    .child(boss ? "workspace boss" : "orchestrator");
 }
 
 function toggleSidebar() {
@@ -543,9 +552,10 @@ export default class Agents extends View {
           return [...seat("workspace", 0), ...subs.map((els, i) => {
             const last = i === subs.length - 1;
             return h_flex().id(`seat-branch-${i}`).items_stretch().pl(16)
-              .child(v_flex().w(9).mr(2).flex_none()
-                .child(div().mt(-4).h(19).border_l(1.5).border_b(1.5).rounded_bl(6).border_color(t.input))
-                .when(!last, (el) => el.child(div().flex_1().border_l(1.5).border_color(t.input))))
+              // One straight line down past every supervisor but the last, with a tick to each;
+              // the last one gets the rounded elbow.
+              .child(v_flex().w(9).mr(2).flex_none().border_color(t.input).when(!last, (el) => el.border_l(1.5))
+                .child(div().h(15).border_b(1.5).border_color(t.input).when(last, (el) => el.border_l(1.5).rounded_bl(6))))
               .child(v_flex().flex_1().min_w(0).children(els));
           })];
         })()),
