@@ -49,14 +49,16 @@ const ORG_LABEL = { workspace: "Workspace", cs: "CS", ag: "AG", personal: "Perso
 // Top to bottom: the Workspace Boss, then each org's supervisor.
 const SEATS = ["workspace", "cs", "ag", "personal"];
 
-// The seat's tag: WORKSPACE BOSS for the top one, WORKSPACE ORCHESTRATOR for the org supervisors;
-// quiet when it is off.
+// The seat's tag, as quiet as the place tags: "workspace boss" (amber, layers) for the top one,
+// "workspace orchestrator" (accent, folder: it runs at its org's root) for the supervisors;
+// grey when it is off.
 function orchTag(t, off, org) {
   const boss = org === "workspace";
-  const fill = boss ? (t.warning ?? t.blocked) : t.accent;
-  return h_flex().id(`orch-tag-${org}-${off}`).flex_none().px(5).h(16).rounded(4).items_center().text_size(10).font_bold()
-    .bg(off ? t.dim + "26" : fill).text_color(off ? t.dim : t.background)
-    .child(boss ? "WORKSPACE BOSS" : "WORKSPACE ORCHESTRATOR");
+  const color = off ? t.dim : boss ? (t.warning ?? t.blocked) : t.accent;
+  return h_flex().id(`orch-tag-${org}-${off}`).flex_none().gap(3).px(5).h(16).rounded(4).items_center().text_size(10.5)
+    .bg(color + (off ? "14" : "1f")).text_color(color)
+    .child(svg(`mods/workspace-chrome/${boss ? "layers" : "folder"}.svg`).size(10).flex_none())
+    .child(boss ? "workspace boss" : "workspace orchestrator");
 }
 
 function toggleSidebar() {
