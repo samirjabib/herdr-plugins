@@ -40,6 +40,15 @@ function orchOf(name) {
   return /^orch-(cs|ag|personal)$/.exec(name ?? "")?.[1] ?? null;
 }
 
+const ORG_LABEL = { cs: "CS", ag: "AG", personal: "Personal" };
+
+// The WORKSPACE ORCHESTRATOR tag; quiet when the orchestrator is off.
+function orchTag(t, off, org) {
+  return h_flex().id(`orch-tag-${org}-${off}`).flex_none().px(5).h(16).rounded(4).items_center().text_size(10).font_bold()
+    .bg(off ? t.dim + "26" : t.accent).text_color(off ? t.dim : t.background)
+    .child("WORKSPACE ORCHESTRATOR");
+}
+
 function toggleSidebar() {
   const width = find(layout(), "sidebar")?.size?.px;
   if (!narrow()) setShared("sidebar.width", width);
@@ -404,7 +413,7 @@ export default class Agents extends View {
       // Under a space header the space goes without saying; an automatic tab number says nothing.
       // Without a space header above (priority, pinned) the row names its space.
       const full = byPriority || isPinned;
-      const name = full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
+      const name = orch ? ORG_LABEL[orch] : full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
       return h_flex()
         .id(`ag-${a.address}`)
         .px(8)
@@ -430,10 +439,7 @@ export default class Agents extends View {
           })).child(pic)))
         .child(h_flex().flex_1().min_w(0).gap(5).items_center()
           .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
-          .when(Boolean(orch), el => el.child(h_flex().flex_none().gap(3).px(5).h(16).rounded(4).items_center().text_size(10.5).font_semibold()
-            .bg(t.accent).text_color(t.background)
-            .tooltip(`mac-workspace orchestrator of ${orch}: one long-lived Claude at ~/mac-workspace/${orch} (ws orchestrator start ${orch})`)
-            .child(`◆ ${orch === "personal" ? "personal" : orch.toUpperCase()} orchestrator`)))
+          .when(Boolean(orch), el => el.child(orchTag(t, false, orch).tooltip(`mac-workspace's ${orch} orchestrator: one long-lived Claude at ~/mac-workspace/${orch} (ws orchestrator start ${orch})`)))
           .when(Boolean(where), el => el.child(h_flex().flex_none().gap(3).px(5).h(16).rounded(4).items_center().text_size(10.5)
             .bg((where === "main" ? t.accent : t.dim) + "1f").text_color(where === "main" ? t.accent : t.muted)
             .tooltip(where === "main" ? "Runs in the main checkout" : `Runs in worktree ${where}`)
@@ -452,8 +458,12 @@ export default class Agents extends View {
 
     // Groups in list order: spaces (grouped) or priority sections. Agents of a
     // space are next to each other in agents(), so neighbours make a group.
-    const groups = pinned.length ? [{ id: "pinned", label: "Pinned", status: null, members: pinned }] : [];
-    for (const a of rest) {
+    // mac-workspace's own orchestrators (orch-<org>) get a section of their own, first.
+    const orchName = (a) => orchOf(all.find((x) => x.address === a.address)?.name);
+    const workspace = rest.filter((a) => orchName(a));
+    const groups = [{ id: "workspace", label: "Workspace agents", status: null, members: workspace }];
+    if (pinned.length) groups.push({ id: "pinned", label: "Pinned", status: null, members: pinned });
+    for (const a of rest.filter((a) => !orchName(a))) {
       const r = rankOf(a) || RANK.idle;
       const id = byPriority ? `sec-${r}` : `sp-${a.space}`;
       if (groups.at(-1)?.id === id) groups.at(-1).members.push(a);
@@ -487,9 +497,27 @@ export default class Agents extends View {
           .when(!byPriority && top && top !== "idle", (el) => el.child(this.status(t, { status: top }, true)))
           .child(svg("mods/workspace-chrome/chevron-right.svg").size(11).flex_none().text_color(t.dim)));
     };
+    const offRow = (org) => h_flex()
+      .id(`orch-off-${org}`)
+      .px(8)
+      .h(30)
+      .flex_none()
+      .rounded(8)
+      .items_center()
+      .gap(9)
+      .tooltip(`Not running. Start it from the mac-workspace app or with: ws orchestrator start ${org}`)
+      .child(div().size(16).flex_none())
+      .child(h_flex().flex_1().min_w(0).gap(5).items_center()
+        .child(div().truncate().text_color(t.dim).child(ORG_LABEL[org]))
+        .child(orchTag(t, true, org)))
+      .child(div().flex_none().text_size(11).text_color(t.dim).child("off"));
+    const live = new Set(workspace.map(orchName));
     const rows = collapsed
       ? list.flatMap(withKids)
-      : groups.flatMap((g) => [header(g), ...(this.folded.has(g.id) ? [] : g.members.flatMap(withKids))]);
+      : groups.flatMap((g) => [header(g), ...(this.folded.has(g.id) ? [] : [
+        ...g.members.flatMap(withKids),
+        ...(g.id === "workspace" ? ["cs", "ag", "personal"].filter((o) => !live.has(o)).map(offRow) : []),
+      ])]);
 
     return v_flex()
       .size_full()
