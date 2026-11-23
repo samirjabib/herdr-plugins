@@ -97,9 +97,13 @@ go to sleep and come back where they were.
   a quiet `orchestrator` tag in its org's color from the mac-workspace app's
   core, else its space's), muted with `off` when not running; under each, its
   org's projects with live agents (by the agent's folder:
-  `<org>/<project>/main|worktrees/...`); under each project, its workers: the
-  task (a named tab or the agent's title), a `⑂ main` / `⑂ <worktree>` tag, the
-  time in its state, and the state. Agents outside the orgs sit under `Other`.
+  `<org>/<project>/main|worktrees/...`); under each project, its workers grouped
+  by checkout: a `main` header (accent branch glyph) first, then one header per
+  worktree (its folder name), each folding with a chevron and holding its agents
+  (several in one checkout stay together) and background terminals. A worker
+  row says the task (a named tab or the agent's title), the time in its state,
+  and the state; outside a checkout group (pinned) it keeps a `⑂ main` /
+  `⑂ <worktree>` tag. Agents outside the orgs sit under `Other`.
   The tree follows the Spaces workspace switcher (and so Collie): `spaces.org`
   (`all`, `cs`, `ag`, `personal`, `other`); an org picked shows the Boss, that
   org's orchestrator and its agents. Seats, projects and agents fold with a
@@ -122,15 +126,20 @@ go to sleep and come back where they were.
     ("3 MCP servers hidden"); nothing left, no chip.
   - **Background terminals** (`hc run --bg` without an agent status): under the
     agent that started them (`parent`), else under the project row they run
-    in: a terminal glyph, its name or its program's short command, `live` /
-    `done` / `failed` (finished ones stay 15 minutes, read with
-    `hc ls --all`), CPU and memory. Click: its pane, else a peek.
+    in (under its checkout's header): a terminal glyph, its name or its
+    program's short command, `live` / `done` (exit 0) / `failed` (its program
+    ended on its own with a non-zero code) / `closed` (ended from outside: a
+    closed pane, a kill, a hangup or a restart, as hc's `reason`, a signal or
+    no exit code say; never `failed`), CPU and memory. Finished ones stay 15
+    minutes (read with `hc ls --all`); hovering one shows a `×` that dismisses
+    it: it leaves the tree at once and is removed with `hc rm`. Click: its
+    pane, else a peek.
   - **Jobs** (terminals named `job-<name>`; Collie's core lists launchd jobs
     without a folder, so it is not read yet): in a quiet `Jobs` group under the
     Boss (run at the workspace root), the org's orchestrator (its root) or the
     project row. Each: its name, schedule (`job.schedule` label, with
     `job.next` in ms: `every 15m · next 4m`) or `on watch`, and `running` with
-    CPU and memory, `failed`, or when it last ran.
+    CPU and memory, `failed`, `closed`, or when it last ran.
   The rail keeps a numbered list in the tree's order. `agents-ws` (the earlier
   copy with the gold `★`) stays installable; the layout no longer uses it.
 - **Clean up** (the switcher's "Clean up…" button, `ctrl-d` there, or the space

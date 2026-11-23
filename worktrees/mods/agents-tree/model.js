@@ -53,7 +53,9 @@ const byUrgency = (x, y) => y.rank - x.rank || y.since - x.since || y.seq - x.se
 
 // The tree. `list`: agents in the list's order, each { address, name, cwd, rank, since, seq,
 // pinned, space }. Returns { boss, pinned, seats: [{ org, orch, projects, loose }] }: each
-// project { org, name, base, orch, workers, rank, since }, `loose` the org's agents outside a
+// project { org, name, base, orch, workers, checkouts, rank, since }, `checkouts` its workers
+// and background terminals by checkout ({ place, workers, background }: "main" first, then each
+// worktree as first met), `loose` the org's agents outside a
 // project. Under All every org seat shows (an off one too) and Other only with agents; an org
 // picked shows only its seat. Pinned workers leave the tree (orchestrators keep their seat).
 // byPriority: projects and workers by urgency, then recency; else in the list's order.
@@ -71,7 +73,7 @@ export function buildTree(list, { org = "all", byPriority = false, extras = [] }
   const projectNode = (p) => {
     const key = `${p.org}/${p.name}`;
     if (!projects.has(key)) {
-      const node = { ...p, orch: null, workers: [], jobs: [], background: [], rank: 0, since: 0, seq: 0 };
+      const node = { ...p, orch: null, workers: [], checkouts: [], jobs: [], background: [], rank: 0, since: 0, seq: 0 };
       projects.set(key, node);
       seats.get(p.org).projects.push(node);
     }
@@ -112,8 +114,23 @@ export function buildTree(list, { org = "all", byPriority = false, extras = [] }
       seat.loose.sort(byUrgency);
     }
   }
+  for (const seat of seats.values()) for (const p of seat.projects) p.checkouts = byCheckout(p.workers, p.background);
   const shown = (s) => (org === "all" ? s.org !== "other" || s.projects.length || s.loose.length || s.jobs.length : s.org === org);
   return { boss, pinned, jobs, seats: [...seats.values()].filter(shown) };
+}
+
+// A project's workers and background terminals grouped by the checkout they run in: the main
+// checkout first, then each worktree in the order first met; each group keeps its order.
+function byCheckout(workers, background) {
+  const groups = new Map([["main", { place: "main", workers: [], background: [] }]]);
+  const at = (x) => {
+    const place = placeOf(x.cwd) ?? "main";
+    if (!groups.has(place)) groups.set(place, { place, workers: [], background: [] });
+    return groups.get(place);
+  };
+  for (const a of workers) at(a).workers.push(a);
+  for (const b of background) at(b).background.push(b);
+  return [...groups.values()].filter((g) => g.workers.length || g.background.length);
 }
 
 // The branch a HEAD file names ("" when detached), null when it couldn't be read.
@@ -277,10 +294,14 @@ export function procTotal(procs, pid) {
   return { cpu: Math.round(cpu * 10) / 10, rss };
 }
 
-// A background terminal's state: live, done (exited 0) or failed.
+// A background terminal's state: live, done (exited 0), failed (its program ended on its own
+// with a non-zero code) or closed: ended from outside (a pane closed, killed, hung up, a restart:
+// hc's reason other than "exited", a signal, or no exit code), which is no failure.
 export function bgState(term) {
   if (term.state === "live") return "live";
-  return term.exit_code === 0 ? "done" : "failed";
+  if (term.exit_code === 0) return "done";
+  const outside = (term.reason != null && term.reason !== "exited") || term.signal != null || typeof term.exit_code !== "number";
+  return outside ? "closed" : "failed";
 }
 
 // A background terminal's name: the one it was given, else its short command.
@@ -288,9 +309,11 @@ export function bgLabel(term) {
   return term.name || shortCmd((term.argv ?? []).join(" ")) || term.address;
 }
 
-// A finished background terminal stays in the tree 15 minutes after it ended.
-export function bgVisible(term, now) {
+// A finished background terminal stays in the tree 15 minutes after it ended, unless it was
+// dismissed (`dismissed`: addresses); a live one always.
+export function bgVisible(term, now, dismissed = null) {
   if (term.state === "live") return true;
+  if (dismissed?.has(term.address)) return false;
   return term.finished_ms != null && now - term.finished_ms <= 15 * 60000;
 }
 
@@ -303,7 +326,7 @@ function span(ms) {
 }
 
 // A job terminal's row: its name (without job-), its schedule from the `job.schedule` label
-// with the next run (`job.next`, ms) or "on watch", running/done/failed, and its last run.
+// with the next run (`job.next`, ms) or "on watch", running/done/failed/closed, and its last run.
 export function jobInfo(term, now) {
   if (!isJob(term.name)) return null;
   const labels = term.labels ?? {};

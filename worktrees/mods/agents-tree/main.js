@@ -114,6 +114,8 @@ export default class Agents extends View {
   init(_props, cx) {
     if (props()?.sortMenu) return;
     this.folded = new Set();
+    // Finished terminals dismissed with their ×: hidden at once, and removed with `hc rm`.
+    this.dismissed = new Set();
     // Each agent's last state and when it changed (ms), kept across restarts.
     try { this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}"); } catch { this.changed = {}; }
     if (!this.changed || typeof this.changed !== "object" || Array.isArray(this.changed)) this.changed = {};
@@ -188,7 +190,7 @@ export default class Agents extends View {
             const r = await hc(["get", x.address, "--json"]).catch(() => null);
             got = r?.code === 0 ? JSON.parse(r.stdout) : null;
           }
-          if (got && bgVisible(got, Date.now())) finished.set(x.address, got);
+          if (got && bgVisible(got, Date.now(), this.dismissed)) finished.set(x.address, got);
         }
         if ([...finished.keys()].join() !== [...this.finished.keys()].join()) { this.finished = finished; cx.notify(); }
         const ps = await exec("ps", ["-axo", "pid,ppid,pcpu,rss,command"]).catch(() => null);
@@ -336,7 +338,7 @@ export default class Agents extends View {
   shownTree(all, addr, lead = [], skip = null) {
     const home = placeOf(all.find((x) => x.address === addr)?.cwd);
     const now = Date.now();
-    const kids = all.filter((k) => k.parent === addr && bgVisible(k, now) && !skip?.has(k.address));
+    const kids = all.filter((k) => k.parent === addr && bgVisible(k, now, this.dismissed) && !skip?.has(k.address));
     const moved = (k) => placeOf(k.cwd) !== null && placeOf(k.cwd) !== home;
     const away = new Map();
     for (const k of kids.filter(moved)) away.set(placeOf(k.cwd), [...(away.get(placeOf(k.cwd)) ?? []), k]);
@@ -371,6 +373,17 @@ export default class Agents extends View {
       .child(div().flex_1().truncate().text_color(s.wt === "main" ? t.accent : t.dim).child(s.wt));
   }
 
+  // A checkout group's header under a project: a branch glyph and "main" or the worktree's
+  // name, with its fold. Its agents and background terminals hang under it.
+  checkoutRow(t, key, place, count, top) {
+    const main = place === "main";
+    return h_flex().id(key).px(8).h(24).flex_none().rounded(8).items_center().gap(6).text_size(12)
+      .tooltip(main ? "The main checkout" : `Worktree ${place}`)
+      .child(svg("mods/workspace-chrome/git-branch.svg").size(12).flex_none().text_color(main ? t.accent : t.dim))
+      .child(div().flex_1().min_w(0).truncate().text_color(main ? t.accent : t.muted).child(place))
+      .child(this.nodeFold(t, key, count, top));
+  }
+
   // A tree line cell in front of a nested row.
   lineCells(t, lines) {
     return lines.map(l => div().self_start().mt(-4).w(9).h(17).mr(4).flex_none()
@@ -379,21 +392,40 @@ export default class Agents extends View {
   }
 
   // A background terminal (no agent status: a dev server, a test run an agent started with
-  // `hc run --bg`): name or short command · live|done|failed · CPU · memory. Click: focus
-  // its pane, else peek at it.
+  // `hc run --bg`): name or short command · live|done|failed|closed · CPU · memory. Click: focus
+  // its pane, else peek at it. A finished one shows a × on hover that dismisses it.
   bgRow(t, k, lines = [], pl = 8) {
     const st = bgState(k);
     const label = bgLabel({ ...k, argv: this.fg[k.address] ?? k.argv });
     const use = this.use.get(k.address);
-    const color = st === "failed" ? t.blocked : st === "done" ? t.dim : t.working;
+    const color = st === "failed" ? t.blocked : st === "live" ? t.working : t.dim;
     const inPane = panes().some((p) => p.terminal === k.address);
-    return h_flex().id(`bg-${k.address}`).pl(pl).pr(8).rounded(8).h(24).flex_none().gap(0).items_center().text_size(12)
+    const hoverKey = `bg-${k.address}`;
+    const dismiss = div().id(`dismiss-${k.address}`).flex_none().ml(4).p(2).rounded(4).text_color(t.dim).cursor_pointer()
+      .hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .tooltip("Dismiss: remove this finished terminal (hc rm)")
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        this.dismissed.add(k.address);
+        this.finished.delete(k.address);
+        this.hovered = null;
+        hc(["rm", k.address]).catch(() => null);
+        cx.notify();
+      })
+      .child(svg("mods/workspace-chrome/x.svg").size(11));
+    return h_flex().id(hoverKey).pl(pl).pr(8).rounded(8).h(24).flex_none().gap(0).items_center().text_size(12)
       .cursor_pointer().hover((el) => el.bg(t.hover))
+      .on_hover((on, cx) => {
+        if (on) this.hovered = hoverKey;
+        else if (this.hovered === hoverKey) this.hovered = null;
+        cx.notify();
+      })
       .on_click(() => (inPane ? run("pane.focus", { terminal: k.address }) : this.peek(k.address)))
       .children(this.lineCells(t, lines))
       .child(svg("mods/workspace-chrome/terminal.svg").size(12).mr(6).flex_none().text_color(t.dim))
       .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(label))
       .child(div().flex_none().ml(6).text_size(11).text_color(color).child(st))
+      .when(st !== "live" && this.hovered === hoverKey, (el) => el.child(dismiss))
       .when(Boolean(use), (el) => el
         .child(div().flex_none().w(36).text_right().text_size(11).text_color(t.dim).child(`${use.cpu}%`))
         .child(div().flex_none().w(46).text_right().text_size(11).text_color(t.dim).child(formatMem(use.rss))));
@@ -571,7 +603,7 @@ export default class Agents extends View {
     const inPanes = new Set(panes().map((p) => p.terminal).filter(Boolean));
     const live = new Set(all.map((x) => x.address));
     const terms = [...all, ...[...this.finished.values()].filter((x) => !live.has(x.address))];
-    const extras = terms.filter((x) => !this.listed.has(x.address) && !inPanes.has(x.address) && bgVisible(x, now)
+    const extras = terms.filter((x) => !this.listed.has(x.address) && !inPanes.has(x.address) && bgVisible(x, now, this.dismissed)
       && (isJob(x.name) || !this.listed.has(x.parent)) && !orchOf(x.name));
     // Background terminals whose CPU and memory the timer reads: extras and agents' kids.
     this.bg = all.filter((x) => x.state === "live" && !this.listed.has(x.address) && !inPanes.has(x.address)).map((x) => x.address);
@@ -587,9 +619,9 @@ export default class Agents extends View {
     setAgentOrder(order.map((a) => a.address));
     if (collapsed) list = order;
 
-    const withKids = (a, i, skip = null) => {
+    const withKids = (a, i, skip = null, grouped = false) => {
       const subs = collapsed ? [] : this.tree(all, a.address, [], skip);
-      const r = row(a, i, subs);
+      const r = row(a, i, subs, grouped);
       if (collapsed) return [r];
       const procs = this.procOpen.has(a.address) ? this.procRows(t, a) : [];
       if (this.folded.has(a.address)) return [r, ...procs];
@@ -641,13 +673,14 @@ export default class Agents extends View {
       if (detail.get(a.address) == null && seen[`${a.space_name}\u0000`] > 1) detail.set(a.address, label(a));
     }
 
-    const row = (a, i, subs = []) => {
+    // grouped: the row sits under its checkout's header, which already names the place.
+    const row = (a, i, subs = [], grouped = false) => {
       const pic = icon(a.program, 16, t.foreground);
       const more = detail.get(a.address);
       // An agent on another machine (`vps/t7`) says which.
       const machine = a.address.includes("/") ? a.address.split("/")[0] : null;
       const dir = cwdOf(a);
-      const where = placeOf(dir);
+      const where = grouped ? null : placeOf(dir);
       const orch = orchOf(nameOf(a));
       const root = where || orch ? null : orgRootOf(dir);
       if (collapsed) {
@@ -757,11 +790,20 @@ export default class Agents extends View {
       const [first, ...rest] = head;
       const headRow = h_flex().id(`${key}-head`).items_center().child(div().flex_1().min_w(0).child(first)).child(this.nodeFold(t, key, count, top));
       if (this.folded.has(key)) return [headRow, ...rest];
+      // A project's agents by checkout: a "main" header, then one per worktree, each with its
+      // agents and background terminals under it.
+      const checkoutEls = (pk, c) => {
+        const ck = `${pk}-co-${c.place}`;
+        const top = c.workers.reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
+        const head = this.checkoutRow(t, ck, c.place, c.workers.length + c.background.length, top);
+        return this.folded.has(ck) ? [head] : [head, ...this.branches(t, `${ck}-w`,
+          [...c.workers.map((a) => withKids(a, 0, null, true)), ...c.background.map(extraEls)], 10)];
+      };
       const projectEls = (p) => {
         const pk = `proj-${p.org}-${p.name}`;
         const pr = this.projectRow(t, p, statusOf);
-        return this.folded.has(pk) ? [pr] : [pr, ...this.branches(t, `${pk}-w`, [...p.workers.map((a) => withKids(a, 0)),
-          ...p.background.map(extraEls), jobsGroup(`${pk}-jobs`, p.jobs)], 10)];
+        return this.folded.has(pk) ? [pr] : [pr, ...this.branches(t, `${pk}-w`, [...p.checkouts.map((c) => checkoutEls(pk, c)),
+          jobsGroup(`${pk}-jobs`, p.jobs)], 10)];
       };
       return [headRow, ...rest, ...this.branches(t, `${key}-p`, [jobsGroup(`${key}-jobs`, s.jobs), ...s.projects.map(projectEls),
         ...s.loose.map((a) => (this.listed.has(a.address) ? withKids(a, 0) : extraEls(a)))], 12)];

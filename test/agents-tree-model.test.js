@@ -198,9 +198,31 @@ test("a background terminal reads live, done (exit 0) or failed, named by its na
   assert.equal(bgState({ state: "live" }), "live");
   assert.equal(bgState({ state: "finished", exit_code: 0 }), "done");
   assert.equal(bgState({ state: "finished", exit_code: 2 }), "failed");
-  assert.equal(bgState({ state: "finished", exit_code: null, signal: 9 }), "failed");
+  assert.equal(bgState({ state: "finished", exit_code: 2, reason: "exited" }), "failed");
   assert.equal(bgLabel({ name: "ci", argv: ["gh", "run", "watch"] }), "ci");
   assert.equal(bgLabel({ name: null, argv: ["/usr/bin/npm", "run", "dev", "--port=3"] }), "npm run dev");
+});
+
+test("a terminal closed by hand (killed, hung up, a restart, no exit code) reads closed, never failed", () => {
+  // As hc reports them: a shell whose pane was closed, a Claude killed on restart.
+  assert.equal(bgState({ state: "finished", exit_code: 1, signal: null, reason: "killed" }), "closed");
+  assert.equal(bgState({ state: "finished", exit_code: 129, signal: null, reason: "killed" }), "closed");
+  assert.equal(bgState({ state: "finished", exit_code: null, signal: 9, reason: "killed" }), "closed");
+  assert.equal(bgState({ state: "finished", exit_code: null, signal: null, reason: "stopped_by_restart" }), "closed");
+  assert.equal(bgState({ state: "finished", exit_code: null }), "closed");
+  assert.equal(bgState({ state: "finished", exit_code: 3, signal: 15 }), "closed");
+  // A program that ran to its end with a non-zero code still failed.
+  assert.equal(bgState({ state: "finished", exit_code: 1, signal: null, reason: "exited" }), "failed");
+  assert.equal(bgState({ state: "finished", exit_code: 0, reason: "exited" }), "done");
+  assert.equal(jobInfo({ name: "job-x", state: "finished", exit_code: 129, reason: "killed", labels: {} }, 0).state, "closed");
+});
+
+test("a dismissed finished terminal leaves the tree; a live one can't be dismissed", () => {
+  const now = 1_000_000_000;
+  const gone = new Set(["t8", "t9"]);
+  assert.equal(bgVisible({ address: "t8", state: "finished", finished_ms: now - 60000 }, now, gone), false);
+  assert.equal(bgVisible({ address: "t7", state: "finished", finished_ms: now - 60000 }, now, gone), true);
+  assert.equal(bgVisible({ address: "t9", state: "live" }, now, gone), true);
 });
 
 test("a finished background terminal stays in the tree for 15 minutes, a live one always", () => {
@@ -241,4 +263,29 @@ test("jobs and parentless background terminals sit where they run: root under th
   assert.deepEqual(agSeat.projects[0].background.map((b) => b.address), ["b1"]);
   // A project with only a background terminal still gets its row.
   assert.deepEqual(tree.seats.find((s) => s.org === "cs").projects.map((p) => [p.name, p.workers.length, p.background.length]), [["site", 0, 1]]);
+});
+
+test("a project's agents are grouped by checkout: main first, then each worktree, several agents of one checkout together", () => {
+  const tree = buildTree([
+    ag("t1", `${R}/ag/shop/worktrees/fix-cart`),
+    ag("t2", `${R}/ag/shop/main/src`),
+    ag("t3", `${R}/ag/shop/worktrees/nav`),
+    ag("t4", `${R}/ag/shop/worktrees/fix-cart/app`),
+    ag("t5", `${R}/ag/shop/main`, { name: "orch-ag-shop" }),
+  ], { extras: [{ address: "b1", name: null, cwd: `${R}/ag/shop/worktrees/nav` }, { address: "b2", name: null, cwd: `${R}/ag/shop/main` }] });
+  const shop = tree.seats.find((s) => s.org === "ag").projects[0];
+  assert.deepEqual(shop.checkouts.map((c) => [c.place, c.workers.map((w) => w.address), c.background.map((b) => b.address)]), [
+    ["main", ["t2"], ["b2"]],
+    ["fix-cart", ["t1", "t4"], []],
+    ["nav", ["t3"], ["b1"]],
+  ]);
+  // The project's own orchestrator is its row, in no group; the flat list still holds every worker.
+  assert.equal(shop.orch.address, "t5");
+  assert.deepEqual(shop.workers.map((w) => w.address), ["t1", "t2", "t3", "t4"]);
+});
+
+test("a project with agents only in main has one main group; byPriority orders inside each group", () => {
+  const tree = buildTree([ag("t1", `${R}/cs/site/main`, { rank: 1 }), ag("t2", `${R}/cs/site/main`, { rank: 4 })], { byPriority: true });
+  const site = tree.seats.find((s) => s.org === "cs").projects[0];
+  assert.deepEqual(site.checkouts.map((c) => [c.place, c.workers.map((w) => w.address)]), [["main", ["t2", "t1"]]]);
 });
