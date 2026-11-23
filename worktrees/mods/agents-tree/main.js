@@ -1,8 +1,13 @@
-// Agents in grouped or priority views; parents take their most urgent sub-agent's place.
+// Agents as a tree: the Workspace Boss, each org's orchestrator under it, the org's projects
+// under that (a one-line summary each), and the agents working in each project under it, with
+// their branch, time, state and their live processes folded under them. The rail keeps a
+// numbered list. Parents take their most urgent sub-agent's place.
 
 import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
-import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout } from "herdr";
+import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, hc, readTextFile, checking } from "herdr";
+import * as fs from "fs/promises";
+import { placeOf, orchOf, orgRootOf, isJob, buildTree, headBranch, hasGithub, projectSummary, parsePs, processTree, plumbingNote, procTotal, formatMem, bgState, bgLabel, bgVisible, jobInfo } from "./model.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -16,38 +21,7 @@ function find(node, id) {
 // The sidebar's rail goes by its width, not a flag: dragging its edge narrows it too.
 const narrow = () => (find(layout(), "sidebar")?.size?.px ?? Infinity) < 160;
 
-// To the rail (on macOS wide enough for the traffic lights), or back to the width it had.
-// The worktree a folder is in (`<repo>/worktrees/<slug>`), else null: the main checkout.
-function worktreeOf(dir) {
-  return /\/worktrees\/([^/]+)/.exec(dir ?? "")?.[1] ?? null;
-}
-
-// Where an orchestrator runs: "main" in a main checkout (`<repo>/main`), its worktree's name
-// in one, else null.
-function placeOf(dir) {
-  return worktreeOf(dir) ?? (/\/main(?:\/|$)/.test(dir ?? "") ? "main" : null);
-}
-
-// A workspace root an orchestrator runs at: "workspace" for ~/mac-workspace, the group for
-// ~/mac-workspace/<group>, else null.
-function rootOf(dir) {
-  const m = /\/mac-workspace(?:\/(cs|ag|personal))?\/?$/.exec(dir ?? "");
-  return m ? m[1] ?? "workspace" : null;
-}
-
-// The org of a mac-workspace orchestrator (`ws orchestrator start <org>` names it orch-<org>), else null.
-function orchOf(name) {
-  return /^orch-(workspace|cs|ag|personal)$/.exec(name ?? "")?.[1] ?? null;
-}
-
-// The organization of a folder under ~/mac-workspace (spaces-ws orgOf), else "other".
-function orgOfDir(dir) {
-  return /\/mac-workspace\/(ag|cs|personal)\//.exec(`${dir ?? ""}/`)?.[1] ?? "other";
-}
-
-const ORG_LABEL = { workspace: "Workspace", cs: "CS", ag: "AG", personal: "Personal" };
-// Top to bottom: the Workspace Boss, then each org's supervisor.
-const SEATS = ["workspace", "cs", "ag", "personal"];
+const ORG_LABEL = { workspace: "Workspace", cs: "CS", ag: "AG", personal: "Personal", other: "Other" };
 
 // Space avatar colors (spaces-ws MARK: the same in every mod that draws space avatars).
 const MARK = { ansi6: "#22a99a", ansi3: "#e3814f", ansi4: "#5b8def", ansi5: "#8b7cf6", ansi2: "#3fae6a", ansi1: "#d9649a" };
@@ -76,6 +50,7 @@ function orchTag(t, off, org) {
     .child(boss ? "workspace boss" : "orchestrator");
 }
 
+// To the rail (on macOS wide enough for the traffic lights), or back to the width it had.
 function toggleSidebar() {
   const width = find(layout(), "sidebar")?.size?.px;
   if (!narrow()) setShared("sidebar.width", width);
@@ -120,8 +95,6 @@ const SORTS = [
   { id: "grouped", label: "Grouped by space", icon: "layers" },
 ];
 const sortOf = () => SORTS.find((s) => s.id === shared("agents.sort")) ?? SORTS[0];
-const SECTION = { 4: "Needs you", 3: "Done", 2: "Working", 1: "Idle" };
-const SECTION_STATUS = { 4: "blocked", 3: "done", 2: "working" };
 
 function duration(ms) {
   const m = Math.floor(ms / 60000);
@@ -164,6 +137,110 @@ export default class Agents extends View {
     cx.spawn(colors);
     // Colors change rarely: once a minute is enough, and the core only reads one small file.
     cx.timer.every(60000, (cx) => cx.spawn(colors));
+    // Live processes under each agent (S4) and each project's summary: read only in a live
+    // window, never during a check.
+    this.procs = new Map(); // agent address -> processTree ({ rows, plumbing })
+    this.use = new Map(); // background terminal -> { cpu, rss } (procTotal)
+    this.fg = {}; // background terminal -> its foreground program's argv (hc get)
+    this.finished = new Map(); // finished terminals (terminals() lists live ones only) -> hc get
+
+    this.procOpen = new Set(); // agents whose processes are unfolded
+    this.pids = {}; // terminal -> its process id (hc get), stable for a terminal's life
+    this.facts = new Map(); // project folder -> { branch, worktrees, github, behind, at, behindAt }
+    this.bases = new Map(); // project folders the tree shows -> the space to open
+    if (checking()) return;
+    cx.timer.every(5000, (cx) => this.refreshProcs(cx));
+    cx.timer.every(15000, (cx) => this.refreshFacts(cx));
+    // The first look soon after start, once the tree has named its projects.
+    cx.timer.after(1500, (cx) => { this.refreshProcs(cx); this.refreshFacts(cx); });
+  }
+
+  // Shown: the sidebar wide (the tree is drawn) and not hidden.
+  shown() {
+    return !narrow() && !find(layout(), "sidebar")?.hidden;
+  }
+
+  // One `ps` per refresh (at most every 5 s, only while shown), walked down from each local
+  // agent's terminal process (its pid from `hc get`, asked once per terminal).
+  refreshProcs(cx) {
+    if (this.readingProcs || !this.shown()) return;
+    this.readingProcs = true;
+    cx.spawn(async (cx) => {
+      try {
+        const list = agents().filter((a) => !a.address.includes("/"));
+        // Background terminals and jobs the tree shows (render keeps them in this.bg).
+        const bg = [...(this.bg ?? [])].filter((x) => !x.includes("/"));
+        for (const a of [...list, ...bg.map((address) => ({ address }))]) {
+          if (this.pids[a.address]) continue;
+          const r = await hc(["get", a.address, "--json"]).catch(() => null);
+          const got = r?.code === 0 ? JSON.parse(r.stdout) : null;
+          if (got?.pid) this.pids[a.address] = got.pid;
+          if (got?.foreground?.argv) this.fg[a.address] = got.foreground.argv;
+        }
+        // Finished background terminals and job runs, for their done/failed and last run:
+        // one `hc ls --all`, then one `hc get` per newly finished one (it no longer changes).
+        const ls = await hc(["ls", "--all", "--json"]).catch(() => null);
+        const ended = ls?.code === 0 ? (JSON.parse(ls.stdout).terminals ?? []).filter((x) => x.state === "finished") : [];
+        const finished = new Map();
+        for (const x of ended) {
+          let got = this.finished.get(x.address);
+          if (!got) {
+            const r = await hc(["get", x.address, "--json"]).catch(() => null);
+            got = r?.code === 0 ? JSON.parse(r.stdout) : null;
+          }
+          if (got && bgVisible(got, Date.now())) finished.set(x.address, got);
+        }
+        if ([...finished.keys()].join() !== [...this.finished.keys()].join()) { this.finished = finished; cx.notify(); }
+        const ps = await exec("ps", ["-axo", "pid,ppid,pcpu,rss,command"]).catch(() => null);
+        if (ps?.code !== 0) return;
+        const procs = parsePs(ps.stdout);
+        const next = new Map();
+        for (const a of list) {
+          const pid = this.pids[a.address];
+          // A pid no longer alive belongs to a gone terminal: ask again next time.
+          if (!pid || !procs.has(pid)) { delete this.pids[a.address]; continue; }
+          const hide = ["claude", a.program?.key, a.program?.name?.toLowerCase()].filter(Boolean);
+          next.set(a.address, processTree(procs, pid, { hide }));
+        }
+        const use = new Map();
+        for (const address of bg) {
+          const total = this.pids[address] ? procTotal(procs, this.pids[address]) : null;
+          if (total) use.set(address, total);
+          else delete this.pids[address];
+        }
+        const before = JSON.stringify([[...this.procs], [...this.use]]);
+        if (JSON.stringify([[...next], [...use]]) !== before) { this.procs = next; this.use = use; cx.notify(); }
+      } catch {} finally { this.readingProcs = false; }
+    });
+  }
+
+  // Each shown project's summary from files (HEAD, config, registered worktrees) every 15 s;
+  // how far local main is behind origin/main (as last fetched, never fetching) once a minute.
+  refreshFacts(cx) {
+    if (this.readingFacts || !this.shown()) return;
+    this.readingFacts = true;
+    cx.spawn(async (cx) => {
+      try {
+        let changed = false;
+        const now = Date.now();
+        for (const base of this.bases.keys()) {
+          const git = `${base}/main/.git`;
+          const old = this.facts.get(base);
+          const head = await readTextFile(`${git}/HEAD`).catch(() => null);
+          const config = await readTextFile(`${git}/config`).catch(() => null);
+          const worktrees = await fs.readdir(`${git}/worktrees`).then((d) => d.length).catch(() => 0);
+          let behind = old?.behind ?? null, behindAt = old?.behindAt ?? 0;
+          if (now - behindAt >= 60000) {
+            const r = await exec("git", ["rev-list", "--count", "refs/heads/main..refs/remotes/origin/main"], { cwd: `${base}/main` }).catch(() => null);
+            behind = r?.code === 0 ? Number(r.stdout.trim()) : null;
+            behindAt = now;
+          }
+          const next = { branch: headBranch(head), worktrees, github: hasGithub(config), behind, behindAt };
+          if (JSON.stringify(next) !== JSON.stringify(old)) { this.facts.set(base, next); changed = true; }
+        }
+        if (changed) cx.notify();
+      } catch {} finally { this.readingFacts = false; }
+    });
   }
 
   // Stamps agents whose state changed. Done and idle count as one: looking at a
@@ -242,27 +319,29 @@ export default class Agents extends View {
   }
 
   // Live sub-agents of `addr`, depth first, each with the tree lines in front of it.
-  tree(all, addr, lead = []) {
-    const kids = all.filter((k) => k.parent === addr && k.state === "live");
+  tree(all, addr, lead = [], skip = null) {
+    const kids = all.filter((k) => k.parent === addr && k.state === "live" && !skip?.has(k.address));
     return kids.flatMap((k, i) => {
       const last = i === kids.length - 1;
       return [
         { t: k, lines: [...lead, last ? "└" : "├"] },
-        ...this.tree(all, k.address, [...lead, last ? "" : "│"]),
+        ...this.tree(all, k.address, [...lead, last ? "" : "│"], skip),
       ];
     });
   }
 
   // tree() as shown: children running somewhere else than their parent sit one level
   // deeper, under a row naming that place: "main" (the main checkout) or the worktree.
-  shownTree(all, addr, lead = []) {
+  // skip: agents the tree places elsewhere (an orchestrator's workers sit under their project).
+  shownTree(all, addr, lead = [], skip = null) {
     const home = placeOf(all.find((x) => x.address === addr)?.cwd);
-    const kids = all.filter((k) => k.parent === addr && k.state === "live");
+    const now = Date.now();
+    const kids = all.filter((k) => k.parent === addr && bgVisible(k, now) && !skip?.has(k.address));
     const moved = (k) => placeOf(k.cwd) !== null && placeOf(k.cwd) !== home;
     const away = new Map();
     for (const k of kids.filter(moved)) away.set(placeOf(k.cwd), [...(away.get(placeOf(k.cwd)) ?? []), k]);
     const items = [...kids.filter((k) => !moved(k)).map((k) => ({ k })), ...[...away].map(([w, ks]) => ({ w, ks }))];
-    const branch = (k, me, below) => [{ t: k, lines: me }, ...this.shownTree(all, k.address, below)];
+    const branch = (k, me, below) => [{ t: k, lines: me }, ...this.shownTree(all, k.address, below, skip)];
     return items.flatMap((it, i) => {
       const last = i === items.length - 1;
       const me = [...lead, last ? "└" : "├"];
@@ -292,8 +371,53 @@ export default class Agents extends View {
       .child(div().flex_1().truncate().text_color(s.wt === "main" ? t.accent : t.dim).child(s.wt));
   }
 
+  // A tree line cell in front of a nested row.
+  lineCells(t, lines) {
+    return lines.map(l => div().self_start().mt(-4).w(9).h(17).mr(4).flex_none()
+      .when(Boolean(l), el => el.border_l(1.5).border_color(t.input))
+      .when(l === "└" || l === "├", el => el.border_b(1.5).rounded_bl(6)));
+  }
+
+  // A background terminal (no agent status: a dev server, a test run an agent started with
+  // `hc run --bg`): name or short command · live|done|failed · CPU · memory. Click: focus
+  // its pane, else peek at it.
+  bgRow(t, k, lines = [], pl = 8) {
+    const st = bgState(k);
+    const label = bgLabel({ ...k, argv: this.fg[k.address] ?? k.argv });
+    const use = this.use.get(k.address);
+    const color = st === "failed" ? t.blocked : st === "done" ? t.dim : t.working;
+    const inPane = panes().some((p) => p.terminal === k.address);
+    return h_flex().id(`bg-${k.address}`).pl(pl).pr(8).rounded(8).h(24).flex_none().gap(0).items_center().text_size(12)
+      .cursor_pointer().hover((el) => el.bg(t.hover))
+      .on_click(() => (inPane ? run("pane.focus", { terminal: k.address }) : this.peek(k.address)))
+      .children(this.lineCells(t, lines))
+      .child(svg("mods/workspace-chrome/terminal.svg").size(12).mr(6).flex_none().text_color(t.dim))
+      .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(label))
+      .child(div().flex_none().ml(6).text_size(11).text_color(color).child(st))
+      .when(Boolean(use), (el) => el
+        .child(div().flex_none().w(36).text_right().text_size(11).text_color(t.dim).child(`${use.cpu}%`))
+        .child(div().flex_none().w(46).text_right().text_size(11).text_color(t.dim).child(formatMem(use.rss))));
+  }
+
+  // A job (job-* terminal): a clock, its name, its schedule or "on watch", its state, its
+  // last run; running, its CPU and memory.
+  jobRow(t, k, pl = 8) {
+    const j = jobInfo(k, Date.now());
+    const use = this.use.get(k.address);
+    const color = j.state === "failed" ? t.blocked : j.state === "running" ? t.working : t.dim;
+    return h_flex().id(`job-${k.address}`).pl(pl).pr(8).rounded(8).h(24).flex_none().gap(6).items_center().text_size(12)
+      .cursor_pointer().hover((el) => el.bg(t.hover)).on_click(() => this.peek(k.address))
+      .tooltip(`${j.name}: ${j.schedule}${j.last ? ` · last run ${j.last}` : ""}`)
+      .child(svg("mods/workspace-chrome/clock.svg").size(12).flex_none().text_color(t.dim))
+      .child(div().min_w(0).flex_shrink(1).truncate().text_color(t.muted).child(j.name))
+      .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(j.schedule))
+      .child(div().flex_none().text_size(11).text_color(color).child(j.state === "done" && j.last ? j.last : j.state))
+      .when(j.state === "running" && Boolean(use), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(`${use.cpu}% · ${formatMem(use.rss)}`)));
+  }
+
   subRow(t, s, shown, compact) {
     const k = s.t;
+    if (!this.listed.has(k.address) && !k.program?.agent && !k.status) return this.bgRow(t, k, s.lines, 39);
     const st = kidStatus(k, this.listed);
     const pic = icon(k.program, 14, t.foreground);
     const on = k.address === shown;
@@ -310,9 +434,7 @@ export default class Agents extends View {
       .when(on, (el) => el.bg(t.raised))
       .hover((s) => s.bg(t.hover))
       .on_click(() => (this.listed.has(k.address) ? run("pane.focus", { terminal: k.address }) : this.peek(k.address)))
-      .children(s.lines.map(l => div().self_start().mt(-4).w(9).h(17).mr(4).flex_none()
-        .when(Boolean(l), el => el.border_l(1.5).border_color(t.input))
-        .when(l === "└" || l === "├", el => el.border_b(1.5).rounded_bl(6))))
+      .children(this.lineCells(t, s.lines))
       .when(Boolean(pic), el => el.child(div().mr(8).child(pic)))
       .child(div().flex_1().truncate().text_color(on ? t.foreground : t.muted).child(k.name || k.template || k.program?.name || k.address))
       .when(Boolean(orchOf(k.name)), el => el.child(div().flex_none().mr(6).px(5).h(16).rounded(4).flex().items_center().text_size(10.5).font_semibold()
@@ -331,6 +453,90 @@ export default class Agents extends View {
     return div().size(7).mx(3).flex_none().rounded(4).bg(a.status === "done" ? color : t.dim + "00");
   }
 
+
+  // Tree lines in front of a level's children: one straight line down past every child but
+  // the last, with a tick to each; the last one gets the rounded elbow.
+  branches(t, id, groups, pl = 16) {
+    return groups.filter((els) => els.length).map((els, i, kept) => {
+      const last = i === kept.length - 1;
+      return h_flex().id(`${id}-${i}`).items_stretch().pl(pl)
+        .child(v_flex().w(9).mr(2).flex_none().border_color(t.input).when(!last, (el) => el.border_l(1.5))
+          .child(div().h(15).border_b(1.5).border_color(t.input).when(last, (el) => el.border_l(1.5).rounded_bl(6))))
+        .child(v_flex().flex_1().min_w(0).children(els));
+    });
+  }
+
+  // The fold chevron of a tree node (a seat, a project); folded, how many it hides, colored
+  // by the most urgent state there.
+  nodeFold(t, key, count, top) {
+    const open = !this.folded.has(key);
+    return div().id(`fold-${key}`).h(18).px(3).gap(3).flex().flex_none().items_center().rounded(4).text_size(11)
+      .text_color(open ? t.dim : (t[top] ?? t.dim)).cursor_pointer()
+      .hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        open ? this.folded.add(key) : this.folded.delete(key);
+        cx.notify();
+      })
+      .child(svg(`mods/workspace-chrome/chevron-${open ? "down" : "right"}.svg`).size(11).flex_none())
+      .when(!open, (el) => el.child(String(count)));
+  }
+
+  // A project row: its name, the quiet summary (⚠ branch, ↓N, ⑂ N, GitHub) and its fold.
+  // Its own orchestrator (orch-<org>-<project>), when running, is the row: a click focuses
+  // it and its state shows. Else a click opens the space its first worker is in.
+  projectRow(t, p, statusOf) {
+    const facts = projectSummary(this.facts.get(p.base));
+    const key = `proj-${p.org}-${p.name}`;
+    const kids = p.workers;
+    const top = kids.reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
+    const space = (p.orch ?? kids[0])?.space;
+    return h_flex().id(key).px(8).h(28).flex_none().rounded(8).items_center().gap(7).cursor_pointer()
+      .hover((s) => s.bg(t.hover))
+      .when(Boolean(p.orch?.focused), (el) => el.bg(t.selected))
+      .on_click(() => (p.orch ? run("pane.focus", { pane: p.orch.pane }) : space && run("space.select", { id: space })))
+      .child(svg("mods/workspace-chrome/folder.svg").size(13).flex_none().text_color(t.muted))
+      .child(div().min_w(0).flex_shrink(1).truncate().text_color(t.foreground).child(p.name))
+      .child(h_flex().flex_1().min_w(0).gap(6).items_center().text_size(11).overflow_hidden()
+        .children(facts.map((f) => (f.kind === "github"
+          ? svg("mods/agents-tree/github.svg").id(`${key}-gh`).size(11).flex_none().text_color(t.dim).tooltip(f.tip)
+          : div().id(`${key}-${f.kind}`).flex_none().text_color(f.warn ? t.ansi1 : t.dim).tooltip(f.tip).child(f.text)))))
+      .when(kids.length > 0, (el) => el.child(this.nodeFold(t, key, kids.length, top)))
+      .when(Boolean(p.orch), (el) => el.child(this.status(t, { status: statusOf(p.orch) }, true)));
+  }
+
+  // An agent's live processes, unfolded: name, CPU and memory, on tree lines.
+  procRows(t, a) {
+    const rows = this.procs.get(a.address)?.rows ?? [];
+    return rows.map((r, i) => h_flex().id(`proc-${a.address}-${r.pid}`).pl(26).pr(8).h(22).flex_none().gap(0).items_center()
+      .text_size(11.5).text_color(t.muted)
+      .child(div().self_start().mt(-4).w(9).h(15).mr(6).flex_none().border_l(1.5).border_color(t.input)
+        .border_b(1.5).rounded_bl(6).when(i < rows.length - 1, (el) => el.rounded_bl(0)))
+      .child(div().flex_1().min_w(0).truncate().child(r.count > 1 ? `${r.name} ×${r.count}` : r.name))
+      .child(div().flex_none().w(36).text_right().text_color(r.cpu >= 50 ? t.blocked : t.dim).child(`${r.cpu}%`))
+      .child(div().flex_none().w(46).text_right().text_color(t.dim).child(formatMem(r.rss))));
+  }
+
+  // The chip that folds an agent's processes: a terminal glyph and how many.
+  procChip(t, a) {
+    const view = this.procs.get(a.address);
+    const rows = view?.rows ?? [];
+    if (!rows.length) return null;
+    const hid = plumbingNote(view.plumbing);
+    const open = this.procOpen.has(a.address);
+    const n = rows.reduce((s, r) => s + r.count, 0);
+    return h_flex().id(`procs-${a.address}`).flex_none().h(18).px(3).gap(3).items_center().rounded(4).text_size(11)
+      .text_color(open ? t.foreground : t.dim).cursor_pointer().hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .tooltip(`${n} live process${n === 1 ? "" : "es"} under this agent${hid ? ` (${hid})` : ""}. Click to ${open ? "fold" : "show"} them`)
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        open ? this.procOpen.delete(a.address) : this.procOpen.add(a.address);
+        cx.notify();
+      })
+      .child(svg("mods/workspace-chrome/terminal.svg").size(11).flex_none())
+      .child(String(n));
+  }
+
   render(cx) {
     const t = theme();
     if (props()?.sortMenu) return this.sortMenu(t);
@@ -343,34 +549,54 @@ export default class Agents extends View {
     const shown = focused()?.agent;
     const now = Date.now();
     this.track(list, now);
-    // A kept sub-agent (one with a pane) is in agents() too: where a tree shows
-    // it, it gets no row of its own, unless it's pinned.
-    const nested = new Set(collapsed ? [] : list.flatMap((a) => this.tree(all, a.address).map((s) => s.t.address)));
+    const termOf = (a) => all.find((x) => x.address === a.address);
+    const nameOf = (a) => termOf(a)?.name;
+    const cwdOf = (a) => termOf(a)?.cwd ?? a.cwd;
+    const isOrch = (a) => Boolean(orchOf(nameOf(a)));
+    // A kept sub-agent (one with a pane) is in agents() too: where a worker's tree shows it,
+    // it gets no row of its own, unless it's pinned. An orchestrator's agents are not nested:
+    // they sit under their project.
+    const nested = new Set(collapsed ? [] : list.filter((a) => !isOrch(a)).flatMap((a) => this.tree(all, a.address).map((s) => s.t.address)));
     list = list.filter((a) => a.pinned || !nested.has(a.address));
-    // The organization the Spaces list shows (spaces-ws): ALL, or only that org's agents.
+    const listedAgents = new Set(list.map((a) => a.address));
+    // The organization the Spaces switcher shows (spaces-ws, following Collie).
     const org = shared("spaces.org") ?? "all";
-    const cwdOf = (a) => all.find((x) => x.address === a.address)?.cwd ?? a.cwd;
-    const isBoss = (a) => all.find((x) => x.address === a.address)?.name === "orch-workspace";
-    if (org !== "all") list = list.filter((a) => isBoss(a) || orgOfDir(cwdOf(a)) === org);
     const tabCounts = new Map();
     for (const a of list) tabCounts.set(a.tab, (tabCounts.get(a.tab) ?? 0) + 1);
     const byPriority = sort.id === "priority";
     const urgency = new Map(list.map((a) => [a.address, Math.max(this.rank(a), ...this.tree(all, a.address).map((s) => RANK[kidStatus(s.t, this.listed)] ?? 0))]));
     const rankOf = (a) => urgency.get(a.address);
-    if (byPriority) list = [...list].sort((x, y) => rankOf(y) - rankOf(x) || this.since(y) - this.since(x) || y.seq - x.seq);
-    const pinned = list.filter((a) => a.pinned);
-    const rest = list.filter((a) => !a.pinned);
-    list = [...pinned, ...rest];
-    setAgentOrder(list.map((a) => a.address));
+    // Terminals that aren't agents nor in a pane: jobs (job-*), and background terminals whose
+    // launcher isn't a listed agent (those show under the agent that started them).
+    const inPanes = new Set(panes().map((p) => p.terminal).filter(Boolean));
+    const live = new Set(all.map((x) => x.address));
+    const terms = [...all, ...[...this.finished.values()].filter((x) => !live.has(x.address))];
+    const extras = terms.filter((x) => !this.listed.has(x.address) && !inPanes.has(x.address) && bgVisible(x, now)
+      && (isJob(x.name) || !this.listed.has(x.parent)) && !orchOf(x.name));
+    // Background terminals whose CPU and memory the timer reads: extras and agents' kids.
+    this.bg = all.filter((x) => x.state === "live" && !this.listed.has(x.address) && !inPanes.has(x.address)).map((x) => x.address);
+    const tree = buildTree(list.map((a) => ({ ...a, name: nameOf(a), cwd: cwdOf(a), rank: rankOf(a) || RANK.idle, since: this.since(a), seq: a.seq ?? 0 })), { org, byPriority, extras });
+    const extraEls = (x) => [isJob(x.name) ? this.jobRow(t, x) : this.bgRow(t, x)];
+    const jobsGroup = (id, jobs) => (jobs.length ? [div().id(id).px(8).h(22).flex_none().flex().items_center().text_size(11).text_color(t.dim).child("Jobs"),
+      ...jobs.map((j) => this.jobRow(t, j))] : []);
+    // Projects whose summary the timer reads, with the space to open.
+    this.bases = new Map(tree.seats.flatMap((s) => s.projects.map((p) => [p.base, p])));
+    // The order agent.next walks: the tree's, top to bottom.
+    const order = [...tree.pinned, ...(tree.boss ? [tree.boss] : []), ...tree.seats.flatMap((s) => [
+      ...(s.orch ? [s.orch] : []), ...s.projects.flatMap((p) => [...(p.orch ? [p.orch] : []), ...p.workers]), ...s.loose])];
+    setAgentOrder(order.map((a) => a.address));
+    if (collapsed) list = order;
 
-    const withKids = (a, i) => {
-      const subs = collapsed ? [] : this.tree(all, a.address);
+    const withKids = (a, i, skip = null) => {
+      const subs = collapsed ? [] : this.tree(all, a.address, [], skip);
       const r = row(a, i, subs);
-      if (this.folded.has(a.address)) return [r];
-      return [r, ...this.shownTree(all, a.address).map((s) => (s.wt ? this.wtRow(t, s) : this.subRow(t, s, shown, byPriority)))];
+      if (collapsed) return [r];
+      const procs = this.procOpen.has(a.address) ? this.procRows(t, a) : [];
+      if (this.folded.has(a.address)) return [r, ...procs];
+      return [r, ...procs, ...this.shownTree(terms, a.address, [], skip).map((s) => (s.wt ? this.wtRow(t, s) : this.subRow(t, s, shown, false)))];
     };
 
-    // The fold chevron; folded, the count too, colored by the most urgent one.
+    // The fold chevron of an agent's sub-agents; folded, the count too, colored by the most urgent one.
     const fold = (a, subs) => {
       const sts = subs.map((s) => kidStatus(s.t, this.listed));
       const top = sts.reduce((m, s) => ((RANK[s] ?? 0) > (RANK[m] ?? 0) ? s : m), null);
@@ -396,9 +622,9 @@ export default class Agents extends View {
         .when(!open, (el) => el.child(String(subs.length)));
     };
 
-    // A row reads "space \u00b7 detail": the detail is a tab someone named or the
-    // agent's own title, never an automatic tab number unless two rows would
-    // otherwise read the same.
+    // A worker row reads its task: a tab someone named or the agent's own title, never an
+    // automatic tab number unless two rows would otherwise read the same. Pinned rows (out
+    // of the tree) name their space too.
     // Read the pane snapshot once: every host read copies the whole list into JS.
     const leads = leadPanes(panes());
     const tabs = new Map(spaces().flatMap(s => s.tabs).map(tab => [tab.id, tab]));
@@ -420,10 +646,10 @@ export default class Agents extends View {
       const more = detail.get(a.address);
       // An agent on another machine (`vps/t7`) says which.
       const machine = a.address.includes("/") ? a.address.split("/")[0] : null;
-      const dir = all.find((x) => x.address === a.address)?.cwd ?? a.cwd;
+      const dir = cwdOf(a);
       const where = placeOf(dir);
-      const orch = orchOf(all.find((x) => x.address === a.address)?.name);
-      const root = where || orch ? null : rootOf(dir);
+      const orch = orchOf(nameOf(a));
+      const root = where || orch ? null : orgRootOf(dir);
       if (collapsed) {
         return h_flex()
           .id(`ag-${a.address}`)
@@ -457,10 +683,10 @@ export default class Agents extends View {
           cx.notify();
         })
         .child(svg(`mods/workspace-chrome/${isPinned ? "pin-off" : "pin"}.svg`).size(13));
-      // Under a space header the space goes without saying; an automatic tab number says nothing.
-      // Without a space header above (priority, pinned) the row names its space.
-      const full = byPriority || isPinned;
+      // In the tree the project row above names the place; a pinned row names its space.
+      const full = isPinned && !orch;
       const name = orch ? ORG_LABEL[orch] : full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
+      const procs = this.procChip(t, a);
       return h_flex()
         .id(`ag-${a.address}`)
         .px(8)
@@ -468,7 +694,7 @@ export default class Agents extends View {
         .flex_none()
         .rounded(8)
         .items_center()
-        .gap(9)
+        .gap(7)
         .when(a.focused, (el) => el.bg(t.selected))
         .cursor_pointer()
         .hover((s) => s.bg(t.hover))
@@ -495,92 +721,59 @@ export default class Agents extends View {
             .bg((t.warning ?? t.blocked) + "1f").text_color(t.warning ?? t.blocked)
             .tooltip(root === "workspace" ? "Runs at the workspace root (~/mac-workspace)" : `Runs at the ${root} root (~/mac-workspace/${root})`)
             .child(svg("mods/workspace-chrome/folder.svg").size(10).flex_none()).child(root === "workspace" ? "root" : `${root} root`)))
-          .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`\u00b7 ${more}`))))
+          .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`· ${more}`))))
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
+        .when(Boolean(procs), el => el.child(procs))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
         .when(this.hovered === a.address, el => el.child(pin))
         .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
-        .child(this.status(t, a, byPriority && !isPinned));
+        .child(this.status(t, a, true));
     };
 
-    // Groups in list order: spaces (grouped) or priority sections. Agents of a
-    // space are next to each other in agents(), so neighbours make a group.
-    // mac-workspace's own orchestrators (orch-<org>) get a section of their own, first.
-    const orchName = (a) => orchOf(all.find((x) => x.address === a.address)?.name);
-    const workspace = rest.filter((a) => orchName(a)).sort((x, y) => SEATS.indexOf(orchName(x)) - SEATS.indexOf(orchName(y)));
-    const groups = [{ id: "workspace", label: "Workspace agents", status: null, members: workspace }];
-    if (pinned.length) groups.push({ id: "pinned", label: "Pinned", status: null, members: pinned });
-    for (const a of rest.filter((a) => !orchName(a))) {
-      const r = rankOf(a) || RANK.idle;
-      const id = byPriority ? `sec-${r}` : `sp-${a.space}`;
-      if (groups.at(-1)?.id === id) groups.at(-1).members.push(a);
-      else groups.push({ id, label: byPriority ? SECTION[r] : a.space_name || "", status: byPriority ? SECTION_STATUS[r] : null, members: [a] });
-    }
-
-    // A group's header; it folds the group. Folded, it says how many and the most urgent state.
-    const header = (g) => {
-      const open = !this.folded.has(g.id);
-      const top = g.members.reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
-      return h_flex()
-        .id(g.id)
-        .px(8)
-        .pt(8)
-        .h(30)
-        .flex_none()
-        .gap(6)
-        .items_center()
-        .text_size(11)
-        .font_medium()
-        .cursor_pointer()
-        .hover((s) => s.text_color(t.foreground))
-        .on_click((_e, cx) => {
-          open ? this.folded.add(g.id) : this.folded.delete(g.id);
-          cx.notify();
-        })
-        .child(div().truncate().text_color(t[g.status] ?? t.dim).child(g.label))
-        .when(byPriority || !open, (el) => el.child(div().text_color(t.dim).child(String(g.members.length))))
-        .child(div().flex_1())
-        .when(!open, (el) => el
-          .when(!byPriority && top && top !== "idle", (el) => el.child(this.status(t, { status: top }, true)))
-          .child(svg("mods/workspace-chrome/chevron-right.svg").size(11).flex_none().text_color(t.dim)));
-    };
-    const offRow = (org) => h_flex()
-      .id(`orch-off-${org}`)
+    // A seat that isn't running: "<Org> orchestrator · off", muted; Other has no orchestrator.
+    const offRow = (o) => h_flex()
+      .id(`orch-off-${o}`)
       .px(8)
       .h(30)
       .flex_none()
       .rounded(8)
       .items_center()
       .gap(9)
-      .tooltip(`Not running. Start it from the mac-workspace app or with: ws orchestrator start ${org}`)
+      .when(o !== "other", (el) => el.tooltip(`Not running. Start it from the mac-workspace app or with: ws orchestrator start ${o}`))
       .child(div().size(16).flex_none())
       .child(h_flex().flex_1().min_w(0).gap(5).items_center()
-        .child(div().truncate().text_color(t.dim).child(ORG_LABEL[org]))
-        .child(orchTag(t, true, org)))
-      .child(div().flex_none().text_size(11).text_color(t.dim).child("off"));
-    const live = new Set(workspace.map(orchName));
-    const rows = collapsed
-      ? list.flatMap(withKids)
-      : groups.flatMap((g) => [header(g), ...(this.folded.has(g.id) ? [] : [
-        ...(g.id !== "workspace" ? g.members.flatMap(withKids) : (() => {
-          const seat = (o, i) => {
-            const a = g.members.find((m) => orchName(m) === o);
-            if (a) return withKids(a, i);
-            return o === "workspace" || org === "all" || o === org ? [offRow(o)] : [];
-          };
-          // The Workspace Boss gives the orders: its supervisors hang under it, with tree lines.
-          const subs = SEATS.slice(1).map((o, i) => seat(o, i + 1)).filter((els) => els.length);
-          return [...seat("workspace", 0), ...subs.map((els, i) => {
-            const last = i === subs.length - 1;
-            return h_flex().id(`seat-branch-${i}`).items_stretch().pl(16)
-              // One straight line down past every supervisor but the last, with a tick to each;
-              // the last one gets the rounded elbow.
-              .child(v_flex().w(9).mr(2).flex_none().border_color(t.input).when(!last, (el) => el.border_l(1.5))
-                .child(div().h(15).border_b(1.5).border_color(t.input).when(last, (el) => el.border_l(1.5).rounded_bl(6))))
-              .child(v_flex().flex_1().min_w(0).children(els));
-          })];
-        })()),
-      ])]);
+        .child(div().truncate().text_color(t.dim).child(ORG_LABEL[o]))
+        .when(o !== "other", (el) => el.child(orchTag(t, true, o))))
+      .child(div().flex_none().text_size(11).text_color(t.dim).child(o === "other" ? "outside the orgs" : "off"));
+
+    // An org's seat: its orchestrator (or the off row), then its projects and their workers.
+    const statusOf = (a) => a.status;
+    const seatEls = (s, i) => {
+      const key = `seat-${s.org}`;
+      const head = s.orch ? withKids(s.orch, i, listedAgents) : [offRow(s.org)];
+      const count = s.projects.length + s.loose.length + s.jobs.length;
+      const top = [...s.projects.flatMap((p) => p.workers), ...s.loose].reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
+      if (!count) return head;
+      const [first, ...rest] = head;
+      const headRow = h_flex().id(`${key}-head`).items_center().child(div().flex_1().min_w(0).child(first)).child(this.nodeFold(t, key, count, top));
+      if (this.folded.has(key)) return [headRow, ...rest];
+      const projectEls = (p) => {
+        const pk = `proj-${p.org}-${p.name}`;
+        const pr = this.projectRow(t, p, statusOf);
+        return this.folded.has(pk) ? [pr] : [pr, ...this.branches(t, `${pk}-w`, [...p.workers.map((a) => withKids(a, 0)),
+          ...p.background.map(extraEls), jobsGroup(`${pk}-jobs`, p.jobs)], 10)];
+      };
+      return [headRow, ...rest, ...this.branches(t, `${key}-p`, [jobsGroup(`${key}-jobs`, s.jobs), ...s.projects.map(projectEls),
+        ...s.loose.map((a) => (this.listed.has(a.address) ? withKids(a, 0) : extraEls(a)))], 12)];
+    };
+
+    const rows = collapsed ? list.flatMap((a, i) => withKids(a, i)) : [
+      ...(tree.pinned.length ? [div().id("pinned").px(8).pt(8).h(30).flex_none().flex().items_center().text_size(11).font_medium().text_color(t.dim).child("Pinned"),
+        ...tree.pinned.flatMap((a) => withKids(a, 0))] : []),
+      // The Workspace Boss gives the orders: the org orchestrators hang under it, with tree lines.
+      ...(tree.boss ? withKids(tree.boss, 0, listedAgents) : [offRow("workspace")]),
+      ...this.branches(t, "seat-branch", [jobsGroup("boss-jobs", tree.jobs), ...tree.seats.map(seatEls)]),
+    ];
 
     return v_flex()
       .size_full()

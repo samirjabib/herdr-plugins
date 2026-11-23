@@ -226,3 +226,15 @@ test("orgView: the Boss's root keeps the pick, another org switches it, hidden s
   assert.equal(orgView({ org: "all", lastActive: null, rows: rows("a1") }).rows.length, 3);
   assert.equal(orgView({ org: "ag", lastActive: "a1", rows: rows("a1"), collapsed: true }).rows.length, 3);
 });
+
+test("the Spaces block: wide it is only the header and the switcher, the rail keeps the space tiles", async () => {
+  const { showsList, blockSize } = await import("../worktrees/mods/spaces-ws/model.js");
+  // The list of spaces left the wide sidebar (the Agents tree is the map now); the rail keeps
+  // its tiles, the only way there to switch spaces.
+  assert.equal(showsList(false), false);
+  assert.equal(showsList(true), true);
+  // The block shrinks to what it holds, and grows back to share the rail with Agents.
+  assert.deepEqual(blockSize({ collapsed: false, switcher: true }), { px: 88 });
+  assert.deepEqual(blockSize({ collapsed: false, switcher: false }), { px: 40 });
+  assert.deepEqual(blockSize({ collapsed: true, switcher: true }), { weight: 1 });
+});

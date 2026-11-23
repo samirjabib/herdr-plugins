@@ -1,12 +1,13 @@
-// Workspace spaces: stable colored avatars, worktrees under their checkout,
-// grouped by machine when more than one is known. After a space's name, the repo
-// its first terminal is in now, only where unusual: branch, ahead/behind. Agent state lives in the agents list, not here. Click to
-// switch, right-click for its menu, drag to reorder.
+// Workspace spaces, in the collie-sheeps sidebar: the header (title, Collie's link, +) and
+// Collie's workspace switcher. The list of spaces left the wide sidebar: the Agents tree
+// (agents-tree) is the map of who runs where, and project health lives in Collie. The rail
+// (collapsed) keeps numbered space tiles, the only way there to switch spaces: click to
+// switch, right-click for its menu.
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Popup } from "gpui-base";
 import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout, notify, home, readTextFile, checking } from "herdr";
-import { repoName, worktreeCount, mainPane, mainCheckout, asleep, spacePlace, orgOf, mainAction, pulledText, pullFailure, orgFace, orgMenu, collieWorkspace, followCollie, linkStatus, orgView } from "./model.js";
+import { repoName, worktreeCount, mainPane, mainCheckout, spacePlace, orgOf, orgFace, orgMenu, collieWorkspace, followCollie, linkStatus, orgView, showsList, blockSize } from "./model.js";
 
 // Collie, the mac-workspace app. Its core (the console server) is the bridge: it serves the
 // org colors Collie picked at /api/colors, and answering there is what "connected" means.
@@ -37,7 +38,6 @@ let LIVE = {};
 function place(s, ps) {
   return spacePlace(s, ps, LIVE);
 }
-const rowHeight = ({ tree }) => (tree ? 28 : 30);
 const RAIL_CELL = 32;
 const railCell = (el) => h_flex().flex_none().justify_center().child(el);
 const where = (s, ps) => JSON.stringify([s.machine ?? null, place(s, ps)]);
@@ -61,7 +61,6 @@ export function tone(t, status) {
 
 export default class Spaces extends View {
   init(_props, cx) {
-    this.pulling = new Set(); // space ids whose main is being pulled
     this.git = {}; // where() -> { name, branch, ahead, behind, repo, linked }, null: not a repo
     this.checked = {}; // where() -> when it was last looked at
     this.unsure = new Set(); // where()s git couldn't answer for (a machine away)
@@ -74,8 +73,6 @@ export default class Spaces extends View {
     // worktree appears under its repo instead of jumping there.
     this.shown = new Set(spaces().map((s) => s.id));
     this.born = {};
-    this.pressed = null;
-    this.over = null;
     this.machines = [];
     this.reconnecting = JSON.parse(localStorage.getItem("machines.reconnecting") ?? "{}");
     for (const state of Object.values(this.reconnecting)) state.busy = false;
@@ -170,7 +167,23 @@ export default class Spaces extends View {
     });
   }
 
+  // The block takes only what it shows (blockSize): the header and switcher when wide, a
+  // share of the column on the rail. Asked again only when the size the layout has differs.
+  fitBlock() {
+    if (checking()) return;
+    const node = find(layout(), "spaces");
+    if (node?.content?.mod !== "spaces-ws") return;
+    const want = blockSize({ collapsed: narrow(), switcher: this.tabsShown });
+    const has = node.size ?? {};
+    if (want.px ? has.px === want.px : has.weight === want.weight && has.px == null) return;
+    const key = JSON.stringify(want);
+    if (this.fitAsked?.key === key && Date.now() - this.fitAsked.at < 2000) return;
+    this.fitAsked = { key, at: Date.now() };
+    run("layout.resize", { id: "spaces", ...want });
+  }
+
   checkNew(cx) {
+    this.fitBlock();
     const now = Date.now();
     const sp = spaces();
     for (const s of sp) if (!this.shown.has(s.id)) this.born[s.id] ??= now;
@@ -414,22 +427,32 @@ export default class Spaces extends View {
         .when(this.switchOpen, (el) => el.content(content)));
   }
 
-  // How the link to Collie is: a quiet dot and Collie's words beside the title; amber and
-  // "sheep loose" only when its core doesn't answer. Click: retry, or open Collie.
+  // How the link to Collie is: a quiet dot and "linked collie" beside the title, muted
+  // "collie off" when its core doesn't answer. Click: bring Collie to the front (and look
+  // again when off).
   linkBadge(t) {
     const working = agents().filter((a) => a.status === "working").length;
     const s = linkStatus(this.link, working);
-    const dot = s.loose ? t.ansi3 : this.link ? tint(t.ansi2, "99", t.dim) : t.dim;
+    const dot = this.link?.ok ? tint(t.ansi2, "99", t.dim) : t.dim;
     return h_flex().id("collie-link").flex_none().h(22).px(6).gap(5).items_center().rounded(6)
-      .text_size(11).text_color(s.loose ? t.ansi3 : t.dim)
+      .text_size(11).text_color(t.dim)
       .cursor_pointer().hover((st) => st.bg(t.hover)).tooltip(s.tip)
       .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
       .on_click((_e, cx) => {
         if (s.loose || !this.link) this.refreshLink(cx);
-        else exec("open", ["-b", COLLIE_APP]).catch(() => {});
+        this.showCollie(cx);
       })
       .child(div().size(6).rounded(3).flex_none().bg(dot))
       .child(s.text);
+  }
+
+  // Collie to the front: by name (~/Applications/Collie.app), else by its bundle id.
+  showCollie(cx) {
+    if (checking()) return;
+    cx.spawn(async () => {
+      const r = await exec("open", ["-a", "Collie"]).catch(() => null);
+      if (r?.code !== 0) await exec("open", ["-b", COLLIE_APP]).catch(() => {});
+    });
   }
 
   // Entering a space lands on its main checkout's pane, where the orchestrator
@@ -438,62 +461,6 @@ export default class Spaces extends View {
     const target = !w.active && mainPane(w, panes(), LIVE);
     run("space.select", { id: w.id });
     if (target) run("pane.focus", { pane: target });
-  }
-
-  // Bring a project's main checkout back to main (only when nothing uncommitted is
-  // there: a switch never carries edits), then land on its agent: the pane already
-  // in main, else a new tab there with Claude.
-  toMain(w, m, cx) {
-    const on = w.machine ?? null;
-    cx.spawn(async (cx) => {
-      const name = w.name;
-      const git = (args) => exec("git", args, { cwd: m.path, on }).catch(() => ({ code: 1, stdout: "", stderr: "couldn't run git" }));
-      const dirty = await git(["status", "--porcelain", "-uno"]);
-      if (dirty.code !== 0 || dirty.stdout.trim()) {
-        notify({ title: `${name}: main not switched`, body: `${m.branch} has uncommitted changes in ${m.path}`, level: "warning" });
-      } else {
-        let r = await git(["switch", "main"]);
-        if (r.code !== 0) r = await git(["switch", "master"]);
-        if (r.code !== 0) notify({ title: `${name}: main not switched`, body: (r.stderr || "").trim().split("\n")[0], level: "warning" });
-        else notify({ title: `${name}: main checkout back on main`, body: `was on ${m.branch}`, level: "info" });
-      }
-      run("space.select", { id: w.id });
-      const pane = mainPane(w, panes(), LIVE);
-      if (pane) run("pane.focus", { pane });
-      else run("tab.new", { space: w.id, name: "main", folder: m.path, argv: ["claude"] });
-      this.refreshGit(new Set([where(w, panes())]), cx);
-    });
-  }
-
-  // Update a project's main checkout from origin: fast-forward only, so it never
-  // merges, rebases or touches local edits git can't carry. Git refuses otherwise,
-  // and its first line of complaint becomes the toast.
-  pullMain(w, m, cx) {
-    if (this.pulling.has(w.id)) return;
-    this.pulling.add(w.id);
-    cx.notify();
-    const on = w.machine ?? null;
-    cx.spawn(async (cx) => {
-      const git = (args) => exec("git", args, { cwd: m.path, on }).catch(() => ({ code: 1, stdout: "", stderr: "couldn't run git" }));
-      // What the pull brought in is told by HEAD before and after, not by the last fetch.
-      try {
-        const head = await git(["rev-parse", "HEAD"]);
-        const before = head.code === 0 ? head.stdout.trim() : "";
-        const r = await git(["pull", "--ff-only", "--quiet"]);
-        if (r.code !== 0) notify({ title: `${w.name}: main not updated`, body: pullFailure(r), level: "warning" });
-        else {
-          // An unreadable count is unknown, never "already up to date".
-          const c = before ? await git(["rev-list", "--count", `${before}..HEAD`]) : null;
-          const n = c?.code === 0 && /^\d+$/.test(c.stdout.trim()) ? Number(c.stdout.trim()) : null;
-          notify({ title: `${w.name}: main updated`, body: pulledText(n), level: "info" });
-        }
-      } finally {
-        // Never leave the mark stuck on "…".
-        this.pulling.delete(w.id);
-        cx.notify();
-      }
-      this.refreshGit(new Set([where(w, panes())]), cx);
-    });
   }
 
   menu(w) {
@@ -549,7 +516,7 @@ export default class Spaces extends View {
   // The rows, under a header per machine once one isn't this computer.
   grouped(t, collapsed) {
     const rows = this.inOrg(this.ordered(), collapsed);
-    const draw = (r) => (collapsed ? this.compact(r, t) : this.row(r, t));
+    const draw = (r) => this.compact(r, t);
     const remote = [...new Set([...rows.map(r => r.w.machine).filter(Boolean), ...this.machines.map(m => m.name), ...Object.keys(this.reconnecting)])].sort();
     const loading = m => {
       const layout = machines().find(k => k.name === m)?.layout;
@@ -614,93 +581,6 @@ export default class Spaces extends View {
     });
   }
 
-  // After the name: how many worktrees the project has, and whether its main
-  // checkout is fresh: \u2713 up to date, \u2193N behind (as last fetched), \u26a0 not on main.
-  gitTail(g, tree, w, t) {
-    const id = w.id;
-    const m = g.main;
-    const act = tree ? null : mainAction(m);
-    const state = !act ? null
-      : act === "switch" ? { text: "\u26a0", color: t.ansi1, tip: `main checkout is on ${m.branch || "a detached HEAD"}, not main. Click: switch it to main and open its agent` }
-      : this.pulling.has(id) ? { text: "\u2026", color: t.dim, tip: "updating main from origin" }
-      : m.behind > 0 ? { text: `\u2193${m.behind}`, color: t.ansi1, tip: `main is ${m.behind} commit${m.behind === 1 ? "" : "s"} behind origin (last fetch). Click: pull it` }
-      : { text: "\u2713", color: t.ansi2, tip: "main is up to date (last fetch). Click: pull to check again" };
-    return h_flex()
-      .flex_1()
-      .min_w(0)
-      .gap(7)
-      .justify_end()
-      .items_center()
-      .text_size(11.5)
-      .text_color(t.dim)
-      .when(!tree && g.worktrees > 0, (el) => el.child(h_flex().id(`space-wt-${id}`).flex_none().gap(3).items_center()
-        .tooltip(`${g.worktrees} worktree${g.worktrees === 1 ? "" : "s"}`)
-        .child(svg("mods/workspace-chrome/branch.svg").size(11)).child(String(g.worktrees))))
-      .when(asleep(w), (el) => el.child(div().id(`space-asleep-${id}`).flex_none().tooltip("Agents asleep: they resume when you open this space").child("\u263e")))
-      .when(Boolean(state), (el) => el.child(div().id(`space-main-${id}`).flex_none().text_color(state.color).tooltip(state.tip)
-        .px(3).rounded(4).cursor_pointer().hover((s) => s.bg(t.hover))
-        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
-        .on_click((_e, cx) => { cx.stop_propagation(); act === "switch" ? this.toMain(w, m, cx) : this.pullMain(w, m, cx); })
-        .child(state.text)));
-  }
-
-  row({ w, i, g, tree }, t) {
-    const on = w.active;
-    const fromIndex = this.pressed === null ? -1 : spaces().findIndex(s => s.id === this.pressed);
-    const colors = shared("space.colors") ?? {};
-    const color = colors[w.id] ?? "ansi6";
-    const fill = color.startsWith("#") ? color : (MARK[color] ?? t[color]);
-    return v_flex()
-      .relative()
-      .id(`space-${w.id}`)
-      .px(8)
-      .h(rowHeight({ tree }))
-      .flex_none()
-      .justify_center()
-      .rounded(8)
-      .when(on, (el) => el.bg(t.selected))
-      .when(!on, (el) => el.hover((s) => s.bg(t.hover)))
-      .when(this.pressed === w.id && this.over !== w.id, (el) => el.opacity(0.5))
-      .when(this.pressed !== null && this.over === w.id && this.pressed !== w.id, (el) => el.child(
-        div().absolute().left(0).right(0).h(2).bg(t.accent)
-          .when(fromIndex < i, line => line.bottom(0))
-          .when(fromIndex > i, line => line.top(0)),
-      ))
-      .on_mouse_down("left", () => {
-        this.pressed = w.id;
-        this.over = w.id;
-      })
-      .on_mouse_move((_e, cx) => {
-        const source = spaces().find(s => s.id === this.pressed);
-        const over = source && (source.machine ?? null) === (w.machine ?? null) ? w.id : null;
-        if (this.pressed !== null && this.over !== over) {
-          this.over = over;
-          cx.notify();
-        }
-      })
-      .on_mouse_up("left", (_e, cx) => {
-        const from = this.pressed;
-        const over = this.over;
-        this.pressed = null;
-        this.over = null;
-        if (from !== null && over === w.id && from !== w.id) {
-          const index = spaces().findIndex(s => s.id === w.id);
-          if (index !== -1) run("space.move", { id: from, index: index + 1 });
-        } else if (from === w.id) this.open(w);
-        cx.notify();
-      })
-      .on_mouse_down("right", () => this.menu(w))
-      .child(
-        h_flex()
-          .gap(9)
-          .items_center()
-          .when(Boolean(tree), el => el.pl(22).child(svg("mods/workspace-chrome/branch.svg").size(13).text_color(t.dim)))
-          .when(!tree, el => el.child(h_flex().size(18).flex_none().rounded(5).bg(fill).items_center().justify_center().text_size(10.5).font_bold().text_color("#ffffff").child([...w.name][0]?.toUpperCase() ?? "?")))
-          .child(div().flex_shrink(0).max_w(150).truncate().text_color(t.foreground).child(w.name))
-          .child(g ? this.gitTail(g, tree, w, t) : div().flex_1()),
-      );
-  }
-
   compact({ w, i }, t) {
     return railCell(h_flex()
       .id(`space-${w.id}`)
@@ -713,6 +593,7 @@ export default class Spaces extends View {
       .when(w.active, (el) => el.bg(t.selected))
       .when(!w.active, (el) => el.hover((s) => s.bg(t.hover)))
       .on_click(() => this.open(w))
+      .on_mouse_down("right", () => this.menu(w))
       .child(div().text_color(w.active ? t.foreground : t.muted).child(String(i + 1)))
       .child(div().absolute().right(5).text_color(tone(t, w.status)).child(glyph(w.status))));
   }
@@ -732,8 +613,10 @@ export default class Spaces extends View {
       changed = true;
     }
     if (changed) setShared("space.colors", kept);
-    // The rows first: they fill this.orgRows, which the switcher counts.
-    const rows = this.grouped(t, collapsed);
+    // The rows first: they fill this.orgRows, which the switcher counts. Wide, no list is
+    // drawn, but the org view still runs: focusing another org's space switches the pick.
+    const list = showsList(collapsed);
+    const rows = list ? this.grouped(t, collapsed) : (this.inOrg(this.ordered(), collapsed), []);
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
       .child(h_flex().h(31).pl(16).pr(10).items_center().justify_between().text_size(11.5).text_color(t.dim)
         .when(collapsed, el => el.pl(0).pr(0).justify_center())
@@ -752,10 +635,6 @@ export default class Spaces extends View {
           .on_click(() => openOverlay({ mod: "space-picker", kind: "dialog", width: 560, height: 540, props: { org: this.org === "all" ? "ag" : this.org } }))
           .child(svg("mods/workspace-chrome/plus.svg").size(14))))
       .when(!collapsed && this.tabsShown, (el) => el.child(this.orgSwitch(t)))
-      .child(v_flex().flex_1().min_h(0).px(collapsed ? 0 : 8).pb(14).overflow_y_scrollbar().mode("always")
-        .on_mouse_up("left", (_e, cx) => { this.pressed = null; cx.notify(); })
-        .children(rows)
-        .when(!collapsed && !rows.length && this.org !== "all", (el) => el.child(
-          div().px(8).py(6).text_size(12).text_color(t.dim).child("No spaces here yet. Use + to open one."))));
+      .when(list, (el) => el.child(v_flex().flex_1().min_h(0).pb(14).overflow_y_scrollbar().mode("always").children(rows)));
   }
 }

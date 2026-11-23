@@ -61,14 +61,15 @@ test("Herdr follows Collie when Collie's pick changes, and only then", () => {
   assert.deepEqual(followCollie({ org: "cs", seen: "ag" }, null), { org: "cs", seen: "ag" });
 });
 
-test("the link says herding N while connected, sheep loose when the core is down", () => {
-  assert.deepEqual(linkStatus({ ok: true }, 3), { text: "herding 3", loose: false, tip: "Collie is herding: 3 agents working. Click to open Collie" });
-  assert.equal(linkStatus({ ok: true }, 1).tip, "Collie is herding: 1 agent working. Click to open Collie");
-  assert.equal(linkStatus({ ok: true }, 0).text, "on watch");
+test("the link reads linked collie while Collie's core answers, collie off when it doesn't", () => {
+  assert.deepEqual(linkStatus({ ok: true }, 3), { text: "linked collie", loose: false, tip: "Linked to Collie: herding 3 agents working. Click to bring Collie to the front" });
+  assert.equal(linkStatus({ ok: true }, 1).tip, "Linked to Collie: herding 1 agent working. Click to bring Collie to the front");
+  assert.equal(linkStatus({ ok: true }, 0).text, "linked collie");
+  assert.match(linkStatus({ ok: true }, 0).tip, /^Linked to Collie: on watch, nothing to herd/);
   const down = linkStatus({ ok: false }, 2);
-  assert.equal(down.text, "sheep loose");
+  assert.equal(down.text, "collie off");
   assert.equal(down.loose, true);
-  assert.match(down.tip, /^Collie unreachable: .*127\.0\.0\.1:4317.*Click to retry/);
+  assert.match(down.tip, /^Collie unreachable: .*127\.0\.0\.1:4317.*Click to open Collie/);
   assert.equal(linkStatus(null, 0).text, "waking up");
   assert.equal(linkStatus(null, 0).loose, false);
 });

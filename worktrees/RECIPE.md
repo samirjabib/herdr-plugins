@@ -18,19 +18,17 @@ go to sleep and come back where they were.
   soft gold `★` when it is on main (where to update and make worktrees from),
   a red `⚠` when it is on another branch. The split buttons open the new
   terminal in that pane's folder, not the focused pane's.
-- **The Spaces sidebar** (`spaces-ws`). After a space's name, only two things:
-  `⑂ N`, how many worktrees its project has, and main's state: `✓` up to date,
-  `↓N` (red) behind origin as last fetched (the sidebar never fetches), `⚠`
-  (red) when the project's main checkout is on another branch. Clicking the
-  `⚠` switches that checkout to main when nothing is uncommitted there (a
-  toast says why not otherwise) and lands on its agent: the pane already in
-  main, else a new tab there with Claude. A space is where its terminals'
-  programs run now (`hc get`, since a space's folder is where it was made and a
-  pane's folder is where its shell started); the terminal of the project the
-  space is named after comes first, its main checkout before its worktrees.
-  Entering a space focuses its pane in main. `☾` marks a space whose agents
-  are asleep.
-  Above the list, Collie's workspace switcher picks the organization (the
+- **The Spaces sidebar** (`spaces-ws`). Only the header (the "Spaces" title,
+  Collie's link and `+`) and Collie's workspace switcher: the list of spaces
+  left the wide sidebar, since the Agents tree below says who runs where and
+  project health (main's branch, behind origin, worktrees) lives in Collie and
+  in the tree's project rows. The block shrinks to what it holds
+  (`layout.resize` on its own `spaces` block: 88 px, 40 px with the switcher
+  hidden). The rail (collapsed sidebar) keeps numbered space tiles, the only
+  way there to switch spaces, and gives the block back its share of the
+  column. Right-click a tile for the space menu. Git actions (switch main,
+  pull) are no longer in Herdr: Collie does them.
+  Collie's workspace switcher picks the organization (the
   mac-workspace group a space's folder is in): one pill as wide as the sidebar
   (36 px, radius 12, the `raised` tone) with a 24 px rounded tile holding the
   org's initials (`CS`, `AG`, `P`, `O`; a stack icon for All workspaces), its
@@ -39,7 +37,7 @@ go to sleep and come back where they were.
   Personal and Other (those with spaces, and the shown one), each with its
   tile, its space count, a dot in the needs-you color when an agent there needs
   you, and an accent check on the shown one; the pill wears that dot when an
-  org it hides needs you. A pick filters the list; a click beside the menu
+  org it hides needs you. A pick filters the Agents tree; a click beside the menu
   closes it. Greys only: the check is the one accent. Jumping to a space of
   another organization switches the pick; clicking "Spaces" hides the switcher
   and lists every space.
@@ -47,14 +45,14 @@ go to sleep and come back where they were.
   Collie switches workspace (it saves it in
   `~/Library/Application Support/mac-workspace/desktop.json`, watched and read
   again every 15 s), the list switches with it; a pick made here stays until
-  Collie picks again. Herdr can't move Collie yet: Collie reads that file only
-  at start and its core has no workspace endpoint. Beside "Spaces", how the
-  link is, in Collie's words: a quiet grey-green dot and `herding N` (N agents
-  working here) or `on watch` while Collie's core answers
-  (`http://127.0.0.1:4317/api/colors`, every 15 s; the org colors it serves
-  are shared as `workspace.colors`); an amber dot and `sheep loose` when it
-  doesn't (tooltip: Collie unreachable). Click: retry when loose, else open
-  Collie (`open -b com.samiros.collie`).
+  Collie picks again. Herdr can't move Collie yet:
+  Collie reads that file only at start and its core has no workspace endpoint.
+  Beside "Spaces", the link: a quiet grey-green dot and `linked collie` while
+  Collie's core answers (`http://127.0.0.1:4317/api/colors`, every 15 s; the
+  org colors it serves are shared as `workspace.colors`), a grey dot and a
+  muted `collie off` when it doesn't. The tooltip keeps the detail (herding N
+  agents working, or why it's off). Click: Collie to the front (`open -a
+  Collie`, else `open -b com.samiros.collie`), and a new look when off.
 - **The `+`** (`space-picker`), laid out the way mac-workspace is. On top, the
   Spaces sidebar's workspace switcher (the same pill, tile and menu; Tab and
   shift-Tab cycle Coldsmoke, Arctic Grey, Personal, Other) and a search named
@@ -93,27 +91,48 @@ go to sleep and come back where they were.
   Claudes end and resume with `claude --resume` when you show the space again,
   its tabs and splits stay, and other programs in front (dev servers) are
   stopped too.
-- **Agents list** (`agents-tree`, a copy of Herdr's `agents` that keeps its look).
-  Two additions:
-  - each orchestrator wears a tag for where it runs: `⑂ main` (a project's
-    main checkout), `⑂ <worktree>`, or `📁 root` / `📁 <group> root` (the
-    workspace root, `~/mac-workspace/<group>`);
-  - processes an orchestrator starts somewhere else (main or a worktree) sit
-    one level deeper, under a row naming that place; ones started where it runs
-    stay at the first level, as Herdr draws them.
-  A mac-workspace orchestrator (`orch-<org>`, from `ws orchestrator start`) wears
-  a quiet `orchestrator` tag in its org's color: the one picked in the mac-workspace
-  app, read from its core (`http://127.0.0.1:4317/api/colors`, shared as
-  `workspace.colors`), else its space's color; the Workspace Boss (`orch-workspace`) a
-  `workspace boss` one, first and under every org filter, with the supervisors
-  hanging under it on tree lines (it gives them their orders). They sit in a "Workspace agents" section
-  at the top, one row per org (cs, ag, personal), quiet and "off" when not running.
-  The list follows the Spaces workspace switcher (and so Collie): spaces-ws shares
-  the pick as `spaces.org` (`all`, `cs`, `ag`, `personal`, `other`).
-  Finished processes leave the list at once, as in Herdr's own. `agents-ws`
-  (the earlier copy with the gold `★`, finished processes kept a while and
-  orphan processes grouped by project) stays installable; the layout no longer
-  uses it.
+- **Agents tree** (`agents-tree`, a copy of Herdr's `agents` that keeps its look).
+  The Workspace Boss (`orch-workspace`, a `workspace boss` tag) on top; under it,
+  on tree lines, each org's orchestrator (`orch-cs`, `orch-ag`, `orch-personal`,
+  a quiet `orchestrator` tag in its org's color from the mac-workspace app's
+  core, else its space's), muted with `off` when not running; under each, its
+  org's projects with live agents (by the agent's folder:
+  `<org>/<project>/main|worktrees/...`); under each project, its workers: the
+  task (a named tab or the agent's title), a `⑂ main` / `⑂ <worktree>` tag, the
+  time in its state, and the state. Agents outside the orgs sit under `Other`.
+  The tree follows the Spaces workspace switcher (and so Collie): `spaces.org`
+  (`all`, `cs`, `ag`, `personal`, `other`); an org picked shows the Boss, that
+  org's orchestrator and its agents. Seats, projects and agents fold with a
+  chevron; pinned agents leave the tree for a `Pinned` group on top; the sort
+  (Priority / Grouped) orders projects and workers. A project's own
+  orchestrator (`orch-<org>-<project>`), when running, is its project row.
+  - **Project row**: name, then only what needs saying: `⚠ <branch>` when its
+    main checkout is on another branch, `↓N` when local main is behind
+    `origin/main` (as last fetched; never fetches), `⑂ N` registered worktrees
+    and a GitHub mark when a remote points there. Read from `.git/HEAD`,
+    `.git/config` and `.git/worktrees` every 15 s, `git rev-list` once a
+    minute, never during a check. Click: its orchestrator, else its space.
+  - **Processes** (`>_ N` on an agent row, folded by default): the live
+    processes under the agent's terminal (one `ps -axo pid,ppid,pcpu,rss,command`
+    every 5 s while the sidebar is wide; the terminal's pid from `hc get`),
+    each with its short command (Collie's `short_cmd`: no flags, values or
+    tokens), CPU and memory. Shells and the agent itself are skipped, a tool's
+    own children fold into it (`Playwright · chromium ×2`), and the agent's
+    plumbing (MCP servers, caffeinate) is only counted in the tooltip
+    ("3 MCP servers hidden"); nothing left, no chip.
+  - **Background terminals** (`hc run --bg` without an agent status): under the
+    agent that started them (`parent`), else under the project row they run
+    in: a terminal glyph, its name or its program's short command, `live` /
+    `done` / `failed` (finished ones stay 15 minutes, read with
+    `hc ls --all`), CPU and memory. Click: its pane, else a peek.
+  - **Jobs** (terminals named `job-<name>`; Collie's core lists launchd jobs
+    without a folder, so it is not read yet): in a quiet `Jobs` group under the
+    Boss (run at the workspace root), the org's orchestrator (its root) or the
+    project row. Each: its name, schedule (`job.schedule` label, with
+    `job.next` in ms: `every 15m · next 4m`) or `on watch`, and `running` with
+    CPU and memory, `failed`, or when it last ran.
+  The rail keeps a numbered list in the tree's order. `agents-ws` (the earlier
+  copy with the gold `★`) stays installable; the layout no longer uses it.
 - **Clean up** (the switcher's "Clean up…" button, `ctrl-d` there, or the space
   menu). Every linked checkout with its size and age, and badges: "in main"
   (its branch is merged: a merged PR from it, which catches squash merges, or
@@ -132,8 +151,8 @@ go to sleep and come back where they were.
   remove and clean up dialogs have Cancel and their action. The keys still work.
 - **The layout** (`collie-sheeps`, "Collie Sheeps": Collie's sibling): Herdr's default with claude-accounts' usage
   and agent-sleep's moon (its popup: Sleep now, Wake all, automatic sleep, off
-  until turned on) in the status bar, the sidebar's spaces from `spaces-ws`,
-  the Agents list from `agents-tree`, pane headers from `pane-branch`, and the
+  until turned on) in the status bar, the sidebar's header and workspace switcher from `spaces-ws`,
+  the Agents tree from `agents-tree`, pane headers from `pane-branch`, and the
   Files and Changes panels from `files-ws` and `changes-ws`. `requires`
   installs claude-accounts and agent-sleep first. It was called `main-accounts`:
   installing removes that copy (the install's manifest owns it), so switch to

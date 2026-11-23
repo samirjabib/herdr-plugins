@@ -114,15 +114,16 @@ export function followCollie({ org, seen }, collie) {
   return { org: collie, seen: collie };
 }
 
-// The link to Collie's core, in Collie's own words. `link`: the last answer ({ok}), null
-// before the first; `working`: agents working here now.
+// The link to Collie's core: "linked collie" while it answers, "collie off" (muted) when it
+// doesn't; the tooltip keeps the detail. `link`: the last answer ({ok}), null before the
+// first; `working`: agents working here now. A click brings Collie to the front.
 export function linkStatus(link, working) {
   if (!link) return { text: "waking up", loose: false, tip: "Looking for Collie's core at 127.0.0.1:4317" };
   if (!link.ok) {
-    return { text: "sheep loose", loose: true, tip: "Collie unreachable: the mac-workspace core at 127.0.0.1:4317 didn't answer (ws console serve; launchd keeps it up). Click to retry" };
+    return { text: "collie off", loose: true, tip: "Collie unreachable: the mac-workspace core at 127.0.0.1:4317 didn't answer (ws console serve; launchd keeps it up). Click to open Collie" };
   }
-  if (!working) return { text: "on watch", loose: false, tip: "Collie is on watch: nothing to herd. Click to open Collie" };
-  return { text: `herding ${working}`, loose: false, tip: `Collie is herding: ${working} agent${working === 1 ? "" : "s"} working. Click to open Collie` };
+  const herd = working ? `herding ${working} agent${working === 1 ? "" : "s"} working` : "on watch, nothing to herd";
+  return { text: "linked collie", loose: false, tip: `Linked to Collie: ${herd}. Click to bring Collie to the front` };
 }
 
 // A folder's organization: its mac-workspace group (`<root>/<group>/...`), "workspace" for
@@ -167,4 +168,18 @@ export function pulledText(n) {
 export function pullFailure(r) {
   const line = (r?.stderr ?? "").trim().split("\n")[0];
   return line || `git exited with code ${r?.code ?? "?"}`;
+}
+
+// The wide sidebar keeps only the header and the workspace switcher: the Agents tree below
+// is the map of who runs where. The rail (collapsed) keeps its space tiles, the only way
+// there to switch spaces.
+export function showsList(collapsed) {
+  return Boolean(collapsed);
+}
+
+// The Spaces block's size for what it holds: the header (31 px) and the switcher (36 px pill
+// and its 8 px gap) plus a little air when wide; on the rail it shares the column with Agents.
+export function blockSize({ collapsed, switcher }) {
+  if (collapsed) return { weight: 1 };
+  return { px: switcher ? 88 : 40 };
 }
