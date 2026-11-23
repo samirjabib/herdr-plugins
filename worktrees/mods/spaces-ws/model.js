@@ -125,9 +125,27 @@ export function linkStatus(link, working) {
   return { text: `herding ${working}`, loose: false, tip: `Collie is herding: ${working} agent${working === 1 ? "" : "s"} working. Click to open Collie` };
 }
 
-// A folder's organization: its mac-workspace group (`<root>/<group>/...`), else "other".
+// A folder's organization: its mac-workspace group (`<root>/<group>/...`), "workspace" for
+// the root itself (the Workspace Boss's home, above every org), else "other".
 export function orgOf(dir) {
-  return /\/mac-workspace\/(ag|cs|personal)\//.exec(`${dir ?? ""}/`)?.[1] ?? "other";
+  const d = `${dir ?? ""}/`;
+  if (/\/mac-workspace\/$/.test(d)) return "workspace";
+  return /\/mac-workspace\/(ag|cs|personal)\//.exec(d)?.[1] ?? "other";
+}
+
+// The spaces the list shows for the organization picked. Focusing a space of another org
+// (from Agents, a toast) switches the pick with it; the workspace root belongs to every org,
+// so focusing it (the Boss) keeps the pick and its space stays listed. A hidden switcher
+// still filters by the pick; only the rail (collapsed) and ALL list every space.
+// rows: [{ id, org, active }]. Returns { org, lastActive, rows }.
+export function orgView({ org, lastActive, rows, collapsed }) {
+  const active = rows.find((r) => r.active);
+  if (active && active.id !== lastActive) {
+    lastActive = active.id;
+    if (org !== "all" && active.org !== "workspace" && active.org !== org) org = active.org;
+  }
+  const shown = collapsed || org === "all" ? rows : rows.filter((r) => r.org === org || r.org === "workspace");
+  return { org, lastActive, rows: shown };
 }
 
 // What clicking the main mark does: "switch" puts the main checkout back on main,

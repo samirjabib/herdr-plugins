@@ -173,7 +173,7 @@ test("a space's organization comes from its mac-workspace group, else other", as
   assert.equal(orgOf(`${H}/mac-workspace/ag/shop/main`), "ag");
   assert.equal(orgOf(`${H}/mac-workspace/cs/site/worktrees/x/src`), "cs");
   assert.equal(orgOf(`${H}/mac-workspace/personal/herdr-plugins/main`), "personal");
-  assert.equal(orgOf(`${H}/mac-workspace`), "other");
+  assert.equal(orgOf(`${H}/mac-workspace`), "workspace");
   assert.equal(orgOf(`${H}/code/app`), "other");
   assert.equal(orgOf(null), "other");
 });
@@ -201,4 +201,27 @@ test("the pull toast says what the pull brought in, and why it failed even when 
 test("a pull whose count can't be read says it updated, without a number", async () => {
   const { pulledText } = await import("../worktrees/mods/spaces-ws/model.js");
   assert.equal(pulledText(null), "main is up to date with origin");
+});
+
+test("orgView: the Boss's root keeps the pick, another org switches it, hidden still filters", async () => {
+  const { orgView } = await import("../worktrees/mods/spaces-ws/model.js");
+  const rows = (active) => [
+    { id: "w1", org: "workspace", active: active === "w1" },
+    { id: "a1", org: "ag", active: active === "a1" },
+    { id: "c1", org: "cs", active: active === "c1" },
+  ];
+  // Clicking the Workspace Boss (root space) with Arctic Grey picked: stays on ag, root listed.
+  let v = orgView({ org: "ag", lastActive: "a1", rows: rows("w1"), collapsed: false });
+  assert.equal(v.org, "ag");
+  assert.deepEqual(v.rows.map((r) => r.id), ["w1", "a1"]);
+  // Focusing a cs space switches the pick to cs.
+  v = orgView({ org: "ag", lastActive: "w1", rows: rows("c1"), collapsed: false });
+  assert.equal(v.org, "cs");
+  assert.deepEqual(v.rows.map((r) => r.id), ["w1", "c1"]);
+  // The same active space again does not switch back.
+  v = orgView({ org: "ag", lastActive: "c1", rows: rows("c1"), collapsed: false });
+  assert.equal(v.org, "ag");
+  // ALL and the rail list every space.
+  assert.equal(orgView({ org: "all", lastActive: null, rows: rows("a1") }).rows.length, 3);
+  assert.equal(orgView({ org: "ag", lastActive: "a1", rows: rows("a1"), collapsed: true }).rows.length, 3);
 });

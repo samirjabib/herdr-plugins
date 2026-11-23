@@ -6,7 +6,7 @@
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, Popup } from "gpui-base";
 import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout, notify, home, readTextFile, checking } from "herdr";
-import { repoName, worktreeCount, mainPane, mainCheckout, asleep, spacePlace, orgOf, mainAction, pulledText, pullFailure, orgFace, orgMenu, collieWorkspace, followCollie, linkStatus } from "./model.js";
+import { repoName, worktreeCount, mainPane, mainCheckout, asleep, spacePlace, orgOf, mainAction, pulledText, pullFailure, orgFace, orgMenu, collieWorkspace, followCollie, linkStatus, orgView } from "./model.js";
 
 // Collie, the mac-workspace app. Its core (the console server) is the bridge: it serves the
 // org colors Collie picked at /api/colors, and answering there is what "connected" means.
@@ -81,7 +81,7 @@ export default class Spaces extends View {
     for (const state of Object.values(this.reconnecting)) state.busy = false;
     this.folded = new Set(JSON.parse(localStorage.getItem("machines.folded") ?? "[]"));
     // The workspace switcher: which organization is shown ("all" or an ORGS id), and
-    // whether the switcher shows at all (click "Spaces" to hide it; hidden lists every space).
+    // whether the switcher shows at all (click "Spaces" to hide it; hidden still filters by the pick).
     this.org = localStorage.getItem("spaces.org") ?? "all";
     setShared("spaces.org", this.org);
     this.tabsShown = localStorage.getItem("spaces.tabs") !== "off";
@@ -347,19 +347,16 @@ export default class Spaces extends View {
     });
   }
 
-  // The rows of the organization shown. A jump to a space of another one (from
-  // Agents, a toast) switches the tab with it. The rail and a hidden bar list all.
+  // The rows of the organization shown (orgView in model.js has the rules).
   inOrg(rows, collapsed) {
     const ps = panes();
     for (const r of rows) r.org = orgOf(place(r.w, ps));
-    const active = rows.find((r) => r.w.active);
-    if (active && active.w.id !== this.lastActive) {
-      this.lastActive = active.w.id;
-      if (this.org !== "all" && active.org !== this.org) this.setOrg(active.org);
-    }
+    const view = orgView({ org: this.org, lastActive: this.lastActive, collapsed,
+      rows: rows.map((r) => ({ id: r.w.id, org: r.org, active: r.w.active, r })) });
+    this.lastActive = view.lastActive;
+    if (view.org !== this.org) this.setOrg(view.org);
     this.orgRows = rows;
-    if (collapsed || !this.tabsShown || this.org === "all") return rows;
-    return rows.filter((r) => r.org === this.org);
+    return view.rows.map((v) => v.r);
   }
 
   setOrg(org) {
@@ -747,7 +744,8 @@ export default class Spaces extends View {
             try { localStorage.setItem("spaces.tabs", this.tabsShown ? "on" : "off"); } catch {}
             cx.notify();
           })
-          .child("Spaces"))
+          // Hidden switcher: the title still says which org the list is filtered to.
+          .child(this.tabsShown || this.org === "all" ? "Spaces" : `Spaces \u00b7 ${orgFace(this.org).label}`))
           .child(this.linkBadge(t)))
         .child(div().id("space-new").size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
           // The project picker, on the organization shown (ALL starts on AG).
@@ -757,7 +755,7 @@ export default class Spaces extends View {
       .child(v_flex().flex_1().min_h(0).px(collapsed ? 0 : 8).pb(14).overflow_y_scrollbar().mode("always")
         .on_mouse_up("left", (_e, cx) => { this.pressed = null; cx.notify(); })
         .children(rows)
-        .when(!collapsed && !rows.length && this.tabsShown && this.org !== "all", (el) => el.child(
+        .when(!collapsed && !rows.length && this.org !== "all", (el) => el.child(
           div().px(8).py(6).text_size(12).text_color(t.dim).child("No spaces here yet. Use + to open one."))));
   }
 }
