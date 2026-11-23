@@ -55,12 +55,25 @@ go to sleep and come back where they were.
   are shared as `workspace.colors`); an amber dot and `sheep loose` when it
   doesn't (tooltip: Collie unreachable). Click: retry when loose, else open
   Collie (`open -b com.samiros.collie`).
-- **The `+`** (`space-picker`): the same organization tabs, a search, and the
-  organization's projects with their worktrees (↑/↓, Enter, Tab for the next
-  organization, Esc). A project that has a space goes there, else a space opens
-  on its main with Claude; a worktree opens as a tab in its project's space; a
-  catalogued project not cloned here says to run `ws clone`; "Other folder…"
-  opens the system's folder picker.
+- **The `+`** (`space-picker`), laid out the way mac-workspace is. On top, the
+  Spaces sidebar's workspace switcher (the same pill, tile and menu; Tab and
+  shift-Tab cycle Coldsmoke, Arctic Grey, Personal, Other) and a search named
+  after the org ("Search Arctic Grey projects…"). Then, in sections: **Here**,
+  the org's seat: "<Org> orchestrator" (Enter focuses `orch-<org>` when it
+  runs, else runs `ws orchestrator start <org>`) and "Terminal at
+  ~/mac-workspace/<org>"; **Recent**, the org's projects opened from here, then
+  ones with a space open; **Projects**, every catalog project of the org
+  (`workspace.tsv`, only that group's) with main's branch on the right (`main`,
+  or a red `⚠ <branch>` when main is on another branch), `⑂ N` worktrees, and
+  the ones not on this Mac muted with "clone" (Enter runs `ws clone <name>` in
+  a new space, then Claude in its main). → or the chevron lists a project's
+  worktrees with their branches (← folds them, only while the search is
+  empty); a search also opens projects that match by a worktree. "Other
+  folder…" (the system's folder picker) and "New terminal" sit quietly last. A
+  project that has a space goes there, else a space opens on its main with
+  Claude; a worktree opens as a tab in its project's space; ⌘⏎ opens New
+  worktree for the selected project. The folders are read once per opening
+  (HEAD files straight from disk, no git per checkout).
 - **Files and Changes panels** (`files-ws`, `changes-ws`, copies of Herdr's).
   They already follow the focused pane's checkout; a row under the title now
   says which: the same `<project> › <worktree>` chip (hover: the path) and its
