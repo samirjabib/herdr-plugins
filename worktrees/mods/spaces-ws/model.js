@@ -134,8 +134,8 @@ export function orgOf(dir) {
 }
 
 // The spaces the list shows for the organization picked. Focusing a space of another org
-// (from Agents, a toast) switches the pick with it; the workspace root belongs to every org,
-// so focusing it (the Boss) keeps the pick and its space stays listed. A hidden switcher
+// (from Agents, a toast) switches the pick with it. The workspace root (the Boss's space) is
+// above every org: focusing it keeps the pick, and it is listed only under ALL. A hidden switcher
 // still filters by the pick; only the rail (collapsed) and ALL list every space.
 // rows: [{ id, org, active }]. Returns { org, lastActive, rows }.
 export function orgView({ org, lastActive, rows, collapsed }) {
@@ -144,7 +144,7 @@ export function orgView({ org, lastActive, rows, collapsed }) {
     lastActive = active.id;
     if (org !== "all" && active.org !== "workspace" && active.org !== org) org = active.org;
   }
-  const shown = collapsed || org === "all" ? rows : rows.filter((r) => r.org === org || r.org === "workspace");
+  const shown = collapsed || org === "all" ? rows : rows.filter((r) => r.org === org);
   return { org, lastActive, rows: shown };
 }
 

@@ -210,14 +210,15 @@ test("orgView: the Boss's root keeps the pick, another org switches it, hidden s
     { id: "a1", org: "ag", active: active === "a1" },
     { id: "c1", org: "cs", active: active === "c1" },
   ];
-  // Clicking the Workspace Boss (root space) with Arctic Grey picked: stays on ag, root listed.
+  // Clicking the Workspace Boss (root space) with Arctic Grey picked: stays on ag; the root
+  // space is not listed under an org (only under ALL).
   let v = orgView({ org: "ag", lastActive: "a1", rows: rows("w1"), collapsed: false });
   assert.equal(v.org, "ag");
-  assert.deepEqual(v.rows.map((r) => r.id), ["w1", "a1"]);
+  assert.deepEqual(v.rows.map((r) => r.id), ["a1"]);
   // Focusing a cs space switches the pick to cs.
   v = orgView({ org: "ag", lastActive: "w1", rows: rows("c1"), collapsed: false });
   assert.equal(v.org, "cs");
-  assert.deepEqual(v.rows.map((r) => r.id), ["w1", "c1"]);
+  assert.deepEqual(v.rows.map((r) => r.id), ["c1"]);
   // The same active space again does not switch back.
   v = orgView({ org: "ag", lastActive: "c1", rows: rows("c1"), collapsed: false });
   assert.equal(v.org, "ag");
