@@ -36,6 +36,17 @@ export function isClaudeName(name) {
   return typeof name === "string" && CLAUDE_NAMES.has(name);
 }
 
+// Claude Code 2.1.32x renames its process after its version ("2.1.323"), so
+// Core's foreground.name no longer says claude. The binary it runs still does:
+// a terminal whose foreground argv[0] is claude gets foreground.name "claude",
+// so every check above and below keeps working. Anything else is returned as is.
+export function withClaudeName(t) {
+  const fg = t?.foreground;
+  if (!fg || typeof fg !== "object" || isClaudeName(fg.name)) return t;
+  const bin = Array.isArray(fg.argv) && typeof fg.argv[0] === "string" ? fg.argv[0].split(/[\\/]/).pop() : null;
+  return isClaudeName(bin) ? { ...t, foreground: { ...fg, name: "claude" } } : t;
+}
+
 // ── The id check, Orca agent-session-resume.ts:105-131 ─────────────────────
 
 const PROVIDER_SESSION_ID_MAX_LENGTH = 512;

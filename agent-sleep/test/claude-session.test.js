@@ -655,3 +655,15 @@ test("claude-session.js is pure: no herdr import, no clock", () => {
   assert.doesNotMatch(src, /from\s+["']herdr["']/);
   assert.doesNotMatch(src, /\brequire\(|\bDate\.now\(|\bperformance\.now\(|node:child_process|node:fs/);
 });
+
+test("a Claude whose process is named after its version (2.1.323) is still a Claude, by its binary", async () => {
+  const { withClaudeName } = await import("../mods/agent-sleep/claude-session.js");
+  const t = { address: "t74", foreground: { name: "2.1.323", argv: ["/Users/me/.local/bin/claude", "--dangerously-skip-permissions"], pid: 9 } };
+  assert.equal(withClaudeName(t).foreground.name, "claude");
+  assert.deepEqual(withClaudeName(t).foreground.argv, t.foreground.argv);
+  const zsh = { address: "t3", foreground: { name: "zsh", argv: ["/bin/zsh", "-l"] } };
+  assert.equal(withClaudeName(zsh), zsh);
+  const named = { address: "t5", foreground: { name: "claude", argv: ["claude"] } };
+  assert.equal(withClaudeName(named), named);
+  assert.equal(withClaudeName({ address: "t6" }).address, "t6");
+});

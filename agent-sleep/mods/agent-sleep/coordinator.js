@@ -56,7 +56,7 @@ import {
 } from "./store.js";
 import { BADGE_KEY, ASLEEP_KEY, badgeValue, asleepValue, sameValue, workspaceOf, parseWorktreeList } from "./badges.js";
 import {
-  loadSession, loadConfigDirs, loadWakeAccount, isClaudeName, parseExitScreen, exitSessionId, sessionFilePath,
+  loadSession, loadConfigDirs, loadWakeAccount, isClaudeName, withClaudeName, parseExitScreen, exitSessionId, sessionFilePath,
 } from "./claude-session.js";
 import { readPrompt, classifyProbe, promptRestored, PROBE_KEY, ERASE_KEY } from "./prompt.js";
 import { resumeFlags, resumeCommand, canResumeIn, hintDifference, REPLAYABLE_ENV } from "./resume.js";
@@ -268,6 +268,8 @@ export function commandOf(name) {
   const c = parseWorkspaceCommand(name);
   if (c?.kind === "sleep") return (co) => co.requestSleepWorkspace(c.path ?? null);
   if (c?.kind === "answer") return (co) => co.answerQuestion(c.question, c.yes);
+  if (c?.kind === "sleep-terminal") return (co) => co.requestTerminal(c.address, "sleep");
+  if (c?.kind === "wake-terminal") return (co) => co.requestTerminal(c.address, "wake");
   return null;
 }
 
@@ -333,6 +335,7 @@ export class Coordinator {
     this.workspacesText = null;
     this.jobs = {}; // path → its sleep's steps 4–5, while this copy runs them
     this.sleepRequest = null; // { path, force }: a sleep asked for, taken by the next pulse
+    this.terminalRequests = []; // { address, what: "sleep" | "wake" }: the ☾'s, taken by the next pulse
     this.question = null; // { id, path, label, count, at }: the confirm that sleep waits on (D5)
     this.questions = 0;
     this.shownSpaces = null; // the spaces shown at the last pulse (D4's edge); null before the first look
@@ -398,6 +401,11 @@ export class Coordinator {
 
   requestWakeAll() {
     this.wakeAllRequested = true;
+  }
+
+  // The ☾ in a pane header: sleep or wake that one terminal. The next pulse takes it.
+  requestTerminal(address, what) {
+    this.terminalRequests.push({ address, what });
   }
 
   // workspace-sleep D5: a workspace's sleep, by its path, or the shown one's
@@ -645,6 +653,7 @@ export class Coordinator {
     const slept = sleptTerminals(this.workspaces, layout.spaces, layout.panes);
     for (const address of [...visible].sort()) {
       if (own(this.records, address)?.state !== "asleep" || slept.has(address)) continue;
+      if (own(this.records, address)?.held === true) continue; // its ☾ wakes it, not being shown
       if ((this.retryAt[address] ?? 0) > now) continue;
       await this.resume(address, "reveal");
     }
@@ -843,8 +852,12 @@ export class Coordinator {
   // only when the backspace went through and Claude's prompt line reads as
   // before the `x`; an erase it can't confirm is "unknown" (no /exit: Claude
   // would get `x/exit`).
-  async probe(address, before) {
-    if (this.isVisible(address)) return "visible";
+  // manual: the person asked for this sleep, so a terminal on screen is probed too.
+  async probe(address, before, { manual = false } = {}) {
+    // Even then, never the terminal you're typing in: your keys could land
+    // between the probe's and be misread.
+    const shown = () => (manual ? this.isFocused(address) : this.isVisible(address));
+    if (shown()) return "visible";
     await this.call(["keys", address, PROBE_KEY]);
     let after = await this.read(address);
     for (let i = 1; i < PROBE_READS && after === before; i++) {
@@ -853,7 +866,7 @@ export class Coordinator {
     }
     const { verdict, typed } = classifyProbe(before, after);
     if (typed && !(await this.erase(address, before))) return "unknown";
-    if (this.isVisible(address)) return "visible";
+    if (shown()) return "visible";
     return verdict;
   }
 
@@ -1083,7 +1096,10 @@ export class Coordinator {
     const sleeping = Object.values(this.workspaces).some((e) => e?.state === "sleeping");
     if (!this.spacesStarted || ticked || sleeping) await this.reconcileWorkspaces();
     if (this.sleepRequest) await this.beginSleep(this.sleepRequest);
-    else await this.jobStep();
+    else {
+      for (const r of this.terminalRequests.splice(0)) await this.terminalRequest(r);
+      await this.jobStep();
+    }
   }
 
   // D4: the person came back to a workspace put to sleep (cameBack: one of
@@ -1125,7 +1141,7 @@ export class Coordinator {
       spaces: this.safe(() => list(this.d.live.spaces()), []),
       panes: this.safe(() => list(this.d.live.panes()), []),
       records: this.records,
-      queued: new Set(Object.keys(this.jobs)),
+      queued: new Set(Object.keys(this.jobs).filter((k) => !k.startsWith("terminal:"))),
       start,
     });
     let result = reconcileSpaces(input());
@@ -1133,7 +1149,8 @@ export class Coordinator {
       result = reconcileSpaces(input());
       if (result.changed && !(await this.saveEntries(result.entries))) return;
     }
-    for (const path of Object.keys(this.jobs)) if (!own(this.workspaces, path)) delete this.jobs[path];
+    // A ☾'s one-terminal sleep (`terminal:<address>`) has no workspace entry.
+    for (const path of Object.keys(this.jobs)) if (!path.startsWith("terminal:") && !own(this.workspaces, path)) delete this.jobs[path];
     for (const path of result.replan) this.jobs[path] = newJob();
     for (const path of result.finish) await this.finishSleep(path);
   }
@@ -1184,6 +1201,33 @@ export class Coordinator {
     for (const id of listedTabs(entry)) this.herdr("tab.settle", { id });
     this.jobs[target] = newJob();
     this.lastEvent = `Putting ${label} to sleep`;
+  }
+
+  // The ☾: one terminal. Sleep runs the workspace sleep's own steps on it alone
+  // (no tab settled, no entry) and marks its record held, so being on screen
+  // doesn't wake it; only its ☾ (or Wake all) does. A working Claude is never
+  // interrupted from the ☾: it says so and stays.
+  async terminalRequest({ address, what }) {
+    const r = own(this.records, address);
+    if (what === "wake") {
+      if (r?.state === "asleep") await this.resume(address, "its \u263e");
+      // Still going to sleep: no longer held, so it wakes once shown, as any other.
+      else if (r?.state === "stopping" && r.held === true) await this.save(withRecord(this.records, address, { ...r, held: false }));
+      return;
+    }
+    const key = `terminal:${address}`;
+    if (r || this.jobs[key]) return; // asleep, or going to sleep, already
+    // A workspace sleep that already has it queued or under way does it.
+    if (Object.values(this.jobs).some((j) => j.current?.address === address || j.queue.includes(address))) return;
+    const [t] = await this.freshTerminals([address]);
+    if (!t) return;
+    const status = statusWord(t.status);
+    if (status === "working" || status === "blocked") {
+      this.d.notify({ title: `${address} is ${status}: not put to sleep`, body: "Let it finish, then use its \u263e again.", level: "warning" });
+      return;
+    }
+    this.jobs[key] = { ...newJob(), phase: "stops", queue: [address], held: true };
+    this.lastEvent = `Putting ${address} to sleep`;
   }
 
   // D12: each local space's workspace, from its place through agent-sleep's
@@ -1272,7 +1316,7 @@ export class Coordinator {
     for (;;) {
       if (job.current === null) {
         if (job.queue.length === 0) return this.endJob(path, job);
-        job.current = { address: job.queue.shift(), phase: "start", at: null, wake: false, signalled: false };
+        job.current = { address: job.queue.shift(), phase: "start", at: null, wake: false, signalled: false, held: job.held === true };
       }
       const outcome = await this.advance(job, job.current);
       if (outcome === "wait") return;
@@ -1288,7 +1332,7 @@ export class Coordinator {
   // with the next reconcile, once no stop of it is still exiting.
   async endJob(path, job) {
     delete this.jobs[path];
-    const notice = didntStopNotice(basename(path) || path, job.failed);
+    const notice = didntStopNotice(path.startsWith("terminal:") ? path.slice(9) : basename(path) || path, job.failed);
     if (notice) this.d.notify(notice);
   }
 
@@ -1410,8 +1454,9 @@ export class Coordinator {
         await this.sleep(PROBE_WAIT_MS); // Claude redrawing
         screen = await this.read(address);
       }
-      next = promptStep(readPrompt(screen, name), { visible: this.isVisible(address), cleared: true });
-      if (next === "probe") next = (await this.probe(address, screen)) === "suggestion" ? "exit" : "refuse";
+      // A workspace sleep is always one the person asked for (menu, popup, key).
+      next = promptStep(readPrompt(screen, name), { visible: this.isVisible(address), cleared: true, manual: true });
+      if (next === "probe") next = (await this.probe(address, screen, { manual: true })) === "suggestion" ? "exit" : "refuse";
       if (next !== "exit") return fail(this.isVisible(address) ? "text still on its prompt line, on screen" : "its draft didn't clear");
     }
     const { session, res } = gate;
@@ -1429,6 +1474,7 @@ export class Coordinator {
       at: this.d.now(),
       by: "manual",
       ...(cur.wake ? { wake: "now" } : {}),
+      ...(cur.held ? { held: true } : {}),
     };
     let previous = own(this.records, address);
     if (!(await this.save(withRecord(this.records, address, record)))) {
@@ -1509,7 +1555,7 @@ export class Coordinator {
   // Core's terminals. `only`: complete just these addresses (a settle);
   // otherwise every local Claude Code terminal and every one with a record.
   async gather({ only } = {}) {
-    const raw = this.safe(() => list(this.d.live.terminals()), []).filter((t) => isObject(t) && isAddress(t.address));
+    const raw = this.safe(() => list(this.d.live.terminals()), []).filter((t) => isObject(t) && isAddress(t.address)).map(withClaudeName);
     const lacking = raw.filter((t) => !hasCoreFields(t)).length;
     let fetched = 0;
     const out = [];
@@ -1523,7 +1569,7 @@ export class Coordinator {
       }
       const full = await this.getTerminal(t.address);
       if (full) fetched += 1;
-      out.push(full ? { ...t, ...full } : t);
+      out.push(full ? withClaudeName({ ...t, ...full }) : t);
     }
     if (!only && raw.length > 0) {
       this.fields = lacking === 0
@@ -1612,7 +1658,7 @@ export class Coordinator {
     if (r.code !== 0) return null;
     try {
       const t = JSON.parse(r.stdout);
-      return isObject(t) && t.address === address ? t : null;
+      return isObject(t) && t.address === address ? withClaudeName(t) : null;
     } catch {
       return null;
     }
@@ -1677,6 +1723,10 @@ export class Coordinator {
 
   isVisible(address) {
     return visibleTerminals(this.layout()).has(address);
+  }
+
+  isFocused(address) {
+    return this.safe(() => this.d.live.focused()?.terminal ?? null, null) === address;
   }
 
   stoppingAddress() {

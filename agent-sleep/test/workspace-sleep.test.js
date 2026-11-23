@@ -105,6 +105,10 @@ test("D11 step 3: an empty line exits; text gets one ctrl+c, then must be empty,
   assert.equal(promptStep(line("empty"), { visible: true, cleared: true }), "exit");
   assert.equal(promptStep(line("text"), { visible: false, cleared: true }), "probe");
   assert.equal(promptStep(line("text"), { visible: true, cleared: true }), "refuse");
+  // A sleep the person asked for may probe a terminal on screen: the probe's `x`
+  // tells Claude's grey suggestion (gone on typing) from a draft (kept, refused).
+  assert.equal(promptStep(line("text"), { visible: true, cleared: true, manual: true }), "probe");
+  assert.equal(promptStep(line("draft"), { visible: true, cleared: true, manual: true }), "refuse");
   assert.equal(promptStep(line("draft"), { visible: false, cleared: true }), "refuse");
   for (const state of ["dialog", "unknown"]) assert.equal(promptStep(line(state), { visible: false, cleared: false }), "refuse", state);
   assert.equal(promptStep({ program: "other", state: "unknown" }, { visible: false, cleared: false }), "refuse");
@@ -430,6 +434,21 @@ test("Claudes: a draft on a hidden terminal is cleared with one ctrl+c; the prob
   assert.deepEqual(exits(w).map((s) => s.address), ["t1"]);
 });
 
+test("Claudes: a terminal still on screen whose prompt keeps Claude's grey suggestion is probed and put to sleep", async () => {
+  const PROBED = SUGGESTION.replace("reply with the single word ok", "x");
+  const { w, co } = await ready((w) => {
+    w.screens.t1 = DRAFT_319;
+    w.onKey.t1 = (key, screen) => (key === "ctrl+c" ? SUGGESTION : key === "x" ? PROBED : key === "backspace" ? SUGGESTION : screen);
+  });
+  co.command(SLEEP_WORKSPACE);
+  await step(co, w);
+  await answer(co, w, true);
+  await steps(co, w, WAIT_PULSES + 4);
+  assert.equal(entries(w)["/code/app"].shownAtSleep, true);
+  assert.deepEqual(w.keys.map((k) => `${k.address} ${k.key}`), ["t1 ctrl+c", "t1 x", "t1 backspace"]);
+  assert.deepEqual(exits(w).map((s) => s.address), ["t1"]);
+});
+
 test("Claudes: a two-line draft is cleared by one ctrl+c (T0b item 4), then /exit", async () => {
   const { w, co } = await ready((w) => {
     addClaude(w, "t3", { pid: 103, fgPid: 203, sid: SID3, screen: MULTI_319, status: IDLE });
@@ -463,7 +482,7 @@ test("Claudes: a draft that won't clear on a hidden terminal → no /exit, count
   assert.match(w.notes[0].body, /^t1: /);
 });
 
-test("Claudes: text on a terminal still shown (no keeper: shownAtSleep) → one ctrl+c, never the probe, no /exit, counted", async () => {
+test("Claudes: text on a terminal still shown (no keeper: shownAtSleep) → one ctrl+c, then the probe (the sleep was asked for), a draft stays: no /exit, counted", async () => {
   const { w, co } = await ready((w) => {
     w.screens.t1 = DRAFT_319;
   });
@@ -472,7 +491,7 @@ test("Claudes: text on a terminal still shown (no keeper: shownAtSleep) → one 
   await answer(co, w, true);
   await steps(co, w, WAIT_PULSES + 4);
   assert.equal(entries(w)["/code/app"].shownAtSleep, true);
-  assert.deepEqual(w.keys.map((k) => `${k.address} ${k.key}`), ["t1 ctrl+c"]);
+  assert.deepEqual(w.keys.map((k) => `${k.address} ${k.key}`), ["t1 ctrl+c", "t1 x"]);
   assert.equal(exits(w).length, 0);
   assert.deepEqual(w.notes.map((n) => n.title), ["app: 1 terminal didn't stop"]);
 });
@@ -854,4 +873,74 @@ test("the bare command and the answers go through command(); the popup's table s
   assert.equal(co.command(sleepWorkspaceCommand("/code/checkout-flow")), true, "T6: one by its path");
   assert.deepEqual(co.sleepRequest, { path: "/code/checkout-flow", force: false });
   assert.equal(SLEEPING.endsWith("/agent-sleep/sleeping.json"), true);
+});
+
+// ── One terminal, from its ☾ (pane header) ──
+
+test("the ☾'s commands name one local terminal: sleep-terminal.<address>, wake-terminal.<address>", () => {
+  assert.deepEqual(parseWorkspaceCommand("sleep-terminal.t1"), { kind: "sleep-terminal", address: "t1" });
+  assert.deepEqual(parseWorkspaceCommand("wake-terminal.t9p"), { kind: "wake-terminal", address: "t9p" });
+  for (const bad of ["sleep-terminal.", "sleep-terminal.mini/t1", "wake-terminal.t1 x", "sleep-terminal.T1"]) assert.equal(parseWorkspaceCommand(bad), null, bad);
+});
+
+const resumesOf = (w) => w.sends.filter((s) => /--resume/.test(s.text));
+
+test("☾: a shown, idle Claude sleeps on its own (no tab settled) and stays asleep on screen until its ☾ wakes it", async () => {
+  const { w, co } = await ready();
+  co.command("sleep-terminal.t1");
+  await steps(co, w, 2);
+  assert.deepEqual(exits(w).map((s) => s.address), ["t1"]);
+  assert.equal(records(w).t1.held, true);
+  assert.deepEqual(w.runs, [], "no tab is settled");
+  assert.deepEqual(entries(w), {}, "no workspace entry");
+  exitClaude(w, "t1");
+  await steps(co, w, 4);
+  assert.equal(records(w).t1.state, "asleep");
+  assert.equal(resumesOf(w).length, 0, "held: shown, yet not resumed");
+  co.command("wake-terminal.t1");
+  await steps(co, w, 2);
+  assert.equal(resumesOf(w).length, 1);
+  assert.equal(Object.hasOwn(records(w), "t1"), false);
+});
+
+test("☾ on a working Claude does nothing and says why: the ☾ never interrupts", async () => {
+  const { w, co } = await ready((w) => { w.core.t1.status = WORKING; });
+  co.command("sleep-terminal.t1");
+  await steps(co, w, 3);
+  assert.equal(exits(w).length, 0);
+  assert.equal(w.interrupts.length, 0);
+  assert.deepEqual(w.notes.map((n) => n.title), ["t1 is working: not put to sleep"]);
+});
+
+test("☾ on the terminal you're typing in (focused): no probe keystroke there, its draft-or-suggestion text is left running", async () => {
+  const { w, co } = await ready((w) => {
+    w.screens.t1 = DRAFT_319;
+    w.onKey.t1 = (key, screen) => (key === "ctrl+c" ? SUGGESTION : screen);
+    w.focused = { ...w.focused, pane: "pa1", terminal: "t1" };
+  });
+  co.command("sleep-terminal.t1");
+  await steps(co, w, 3);
+  assert.deepEqual(w.keys.map((k) => `${k.address} ${k.key}`), ["t1 ctrl+c"], "never an x where you're typing");
+  assert.equal(exits(w).length, 0);
+});
+
+test("☾ while a workspace sleep already has that terminal queued: no second job on it", async () => {
+  const { w, co } = await ready();
+  await sleepShown(co, w);
+  co.command("sleep-terminal.t1");
+  await steps(co, w, WAIT_PULSES + 4);
+  assert.equal(exits(w).filter((s) => s.address === "t1").length, 1, "one /exit, never two");
+});
+
+test("☾ wake while it is still going to sleep: kept, and woken once the sleep lands", async () => {
+  const { w, co } = await ready();
+  co.command("sleep-terminal.t1");
+  await steps(co, w, 2);
+  assert.equal(records(w).t1.state, "stopping");
+  co.command("wake-terminal.t1");
+  await steps(co, w, 1);
+  assert.equal(records(w).t1.held, false, "no longer held: being on screen wakes it");
+  exitClaude(w, "t1");
+  await steps(co, w, 6);
+  assert.equal(resumesOf(w).length, 1);
 });

@@ -163,6 +163,22 @@ test("re-install after the plugin stops shipping an item: it is removed and drop
   assert.equal(readFileSync(join(home, "mods/other/main.js"), "utf8"), "// theirs\n", "a foreign mod is never touched");
 });
 
+test("worktrees' layout is collie-sheeps: an install removes the main-accounts copy it made, never one it didn't", () => {
+  const mine = fakeHome({ "layouts/main-accounts.json": "{}\n", ".herdr-plugins/worktrees.txt": "layouts/main-accounts.json\n" });
+  const r = run(INSTALL, mine, "--no-keys", "--alone", "worktrees");
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(existsSync(join(mine, "layouts/main-accounts.json")), false);
+  assert.ok(existsSync(join(mine, "layouts/collie-sheeps.json")));
+  assert.ok(manifest(mine, "worktrees").includes("layouts/collie-sheeps.json"));
+  assert.ok(!manifest(mine, "worktrees").includes("layouts/main-accounts.json"));
+
+  const theirs = fakeHome({ "layouts/main-accounts.json": "// theirs\n" });
+  const r2 = run(INSTALL, theirs, "--no-keys", "--alone", "worktrees");
+  assert.equal(r2.status, 0, r2.stderr);
+  assert.equal(readFileSync(join(theirs, "layouts/main-accounts.json"), "utf8"), "// theirs\n");
+  assert.ok(existsSync(join(theirs, "layouts/collie-sheeps.json")));
+});
+
 // ── --uninstall ────────────────────────────────────────────────────────────
 
 test("--uninstall removes only what the manifest lists; a foreign mod stays", () => {

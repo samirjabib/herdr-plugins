@@ -174,11 +174,13 @@ export function flightOf({ kind = "claude", status, prompt, visible }) {
 // "probe" (text after it, on a hidden terminal: only a suggestion lets it
 // exit) or "refuse" (no /exit: `/exit` after "hola" would reach Claude as
 // "hola/exit", agent-sleep's J-001 class).
-export function promptStep(prompt, { visible, cleared }) {
+// manual: the person asked for this sleep, so a terminal on screen may be
+// probed too (Claude 2.1.32x keeps a grey suggestion there after ctrl+c).
+export function promptStep(prompt, { visible, cleared, manual = false }) {
   if (!isObject(prompt) || prompt.program !== "claude") return "refuse";
   if (prompt.state === "empty") return "exit";
   if (!cleared) return prompt.state === "text" || prompt.state === "draft" ? "clear" : "refuse";
-  return prompt.state === "text" && visible !== true ? "probe" : "refuse";
+  return prompt.state === "text" && (visible !== true || manual === true) ? "probe" : "refuse";
 }
 
 // ── D2 (b): the hang-up ─────────────────────────────────────────────────────
@@ -355,6 +357,9 @@ function pathOfHex(hex) {
 // one at that path.
 export function parseWorkspaceCommand(name) {
   if (typeof name !== "string") return null;
+  // One local terminal, from its ☾ in the pane header.
+  const one = /^(sleep|wake)-terminal\.(t[0-9a-z]+)$/.exec(name);
+  if (one) return { kind: `${one[1]}-terminal`, address: one[2] };
   if (name === SLEEP_WORKSPACE) return { kind: "sleep" };
   if (name.startsWith(SLEEP_AT)) {
     const path = pathOfHex(name.slice(SLEEP_AT.length));
