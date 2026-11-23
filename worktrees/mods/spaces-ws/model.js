@@ -69,6 +69,62 @@ export function spacePlace(space, ps, live) {
 // then everything outside them.
 export const ORGS = [["ag", "AG"], ["cs", "CS"], ["personal", "PERSONAL"], ["other", "OTHER"]];
 
+// The workspace switcher (Collie's, in its words): All first, then Collie's order (cs, ag,
+// personal, its ⌘1–⌘3), then what is outside mac-workspace. Initials as Collie's tiles.
+const SWITCH = [
+  ["all", "All workspaces", ""],
+  ["cs", "Coldsmoke", "CS"],
+  ["ag", "Arctic Grey", "AG"],
+  ["personal", "Personal", "P"],
+  ["other", "Other", "O"],
+];
+
+// What the switcher's pill shows for a pick: the org's name and initials (All: none).
+export function orgFace(org) {
+  const [, label, initials] = SWITCH.find(([id]) => id === org) ?? SWITCH[0];
+  return { label, initials };
+}
+
+// The switcher's menu. `rows`: the list's rows with their `org`; `picked`: the shown one.
+// All always, each org with spaces (and the picked one even when empty): its count, and
+// `needs` when an agent in one of its spaces is blocked.
+export function orgMenu(rows, picked) {
+  return SWITCH.map(([id, label, initials]) => {
+    const list = id === "all" ? rows : rows.filter((r) => r.org === id);
+    return { id, label, initials, count: list.length, needs: list.some((r) => r.w?.status === "blocked"), on: picked === id };
+  }).filter((m) => m.id === "all" || m.count || m.on);
+}
+
+// The workspace Collie shows, from its desktop.json (`{"workspace": "cs"|"ag"|"personal"|"all"}`);
+// null when the file is missing, broken or names something else.
+export function collieWorkspace(text) {
+  try {
+    const ws = JSON.parse(text ?? "")?.workspace;
+    return ["all", "cs", "ag", "personal"].includes(ws) ? ws : null;
+  } catch {
+    return null;
+  }
+}
+
+// Herdr follows Collie: when Collie's pick differs from the last one seen, the list switches
+// to it; a pick made here stays until Collie picks again. `seen`: Collie's last pick (null at
+// first), `collie`: its pick now (null: unreadable, nothing changes).
+export function followCollie({ org, seen }, collie) {
+  if (collie == null || collie === seen) return { org, seen };
+  return { org: collie, seen: collie };
+}
+
+// The link to Collie's core, in Collie's own words. `link`: the last answer ({ok}), null
+// before the first; `working`: agents working here now.
+export function linkStatus(link, working) {
+  if (!link) return { text: "waking up", loose: false, tip: "Looking for Collie's core at 127.0.0.1:4317" };
+  if (!link.ok) {
+    return { text: "sheep loose", loose: true, tip: "Collie unreachable: the mac-workspace core at 127.0.0.1:4317 didn't answer (ws console serve; launchd keeps it up). Click to retry" };
+  }
+  if (!working) return { text: "on watch", loose: false, tip: "Collie is on watch: nothing to herd. Click to open Collie" };
+  return { text: `herding ${working}`, loose: false, tip: `Collie is herding: ${working} agent${working === 1 ? "" : "s"} working. Click to open Collie` };
+}
+
 // A folder's organization: its mac-workspace group (`<root>/<group>/...`), else "other".
 export function orgOf(dir) {
   return /\/mac-workspace\/(ag|cs|personal)\//.exec(`${dir ?? ""}/`)?.[1] ?? "other";

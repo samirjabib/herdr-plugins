@@ -30,11 +30,31 @@ go to sleep and come back where they were.
   space is named after comes first, its main checkout before its worktrees.
   Entering a space focuses its pane in main. `☾` marks a space whose agents
   are asleep.
-  Tabs above the list pick the organization: ALL, then AG, CS, PERSONAL (the
-  mac-workspace group a space's folder is in) and OTHER, each with its count
-  and a dot in the needs-you color when an agent there needs you. Jumping to a
-  space of another organization switches the tab; clicking "Spaces" hides the
-  bar and lists every space.
+  Above the list, Collie's workspace switcher picks the organization (the
+  mac-workspace group a space's folder is in): one pill as wide as the sidebar
+  (36 px, radius 12, the `raised` tone) with a 24 px rounded tile holding the
+  org's initials (`CS`, `AG`, `P`, `O`; a stack icon for All workspaces), its
+  name (Coldsmoke, Arctic Grey, Personal, Other) and an up/down chevron. A
+  click opens a menu, "Workspaces": All workspaces, Coldsmoke, Arctic Grey,
+  Personal and Other (those with spaces, and the shown one), each with its
+  tile, its space count, a dot in the needs-you color when an agent there needs
+  you, and an accent check on the shown one; the pill wears that dot when an
+  org it hides needs you. A pick filters the list; a click beside the menu
+  closes it. Greys only: the check is the one accent. Jumping to a space of
+  another organization switches the pick; clicking "Spaces" hides the switcher
+  and lists every space.
+- **Linked to Collie** (the mac-workspace app). The pick follows Collie: when
+  Collie switches workspace (it saves it in
+  `~/Library/Application Support/mac-workspace/desktop.json`, watched and read
+  again every 15 s), the list switches with it; a pick made here stays until
+  Collie picks again. Herdr can't move Collie yet: Collie reads that file only
+  at start and its core has no workspace endpoint. Beside "Spaces", how the
+  link is, in Collie's words: a quiet grey-green dot and `herding N` (N agents
+  working here) or `on watch` while Collie's core answers
+  (`http://127.0.0.1:4317/api/colors`, every 15 s; the org colors it serves
+  are shared as `workspace.colors`); an amber dot and `sheep loose` when it
+  doesn't (tooltip: Collie unreachable). Click: retry when loose, else open
+  Collie (`open -b com.samiros.collie`).
 - **The `+`** (`space-picker`): the same organization tabs, a search, and the
   organization's projects with their worktrees (↑/↓, Enter, Tab for the next
   organization, Esc). A project that has a space goes there, else a space opens
@@ -75,8 +95,8 @@ go to sleep and come back where they were.
   `workspace boss` one, first and under every org filter, with the supervisors
   hanging under it on tree lines (it gives them their orders). They sit in a "Workspace agents" section
   at the top, one row per org (cs, ag, personal), quiet and "off" when not running.
-  The list follows the Spaces org filter (ALL / AG / CS / PERSONAL): spaces-ws shares
-  it as `spaces.org`.
+  The list follows the Spaces workspace switcher (and so Collie): spaces-ws shares
+  the pick as `spaces.org` (`all`, `cs`, `ag`, `personal`, `other`).
   Finished processes leave the list at once, as in Herdr's own. `agents-ws`
   (the earlier copy with the gold `★`, finished processes kept a while and
   orphan processes grouped by project) stays installable; the layout no longer
@@ -97,12 +117,14 @@ go to sleep and come back where they were.
   space freed.
 - **Buttons.** The switcher has "+ New worktree" and "Clean up…"; the create,
   remove and clean up dialogs have Cancel and their action. The keys still work.
-- **The layout** (`main-accounts`): Herdr's default with claude-accounts' usage
+- **The layout** (`collie-sheeps`, "Collie Sheeps": Collie's sibling): Herdr's default with claude-accounts' usage
   and agent-sleep's moon (its popup: Sleep now, Wake all, automatic sleep, off
   until turned on) in the status bar, the sidebar's spaces from `spaces-ws`,
   the Agents list from `agents-tree`, pane headers from `pane-branch`, and the
   Files and Changes panels from `files-ws` and `changes-ws`. `requires`
-  installs claude-accounts and agent-sleep first.
+  installs claude-accounts and agent-sleep first. It was called `main-accounts`:
+  installing removes that copy (the install's manifest owns it), so switch to
+  it with `herdr-app do layout.switch '{"name":"collie-sheeps"}'`.
 
 **Updates.** The seven mods are copies of Herdr's shipped ones, so they don't
 follow Herdr's updates. If Herdr's own spaces list or pane header gains

@@ -4,9 +4,19 @@
 // switch, right-click for its menu, drag to reorder.
 
 import { View, div, svg } from "gpui-kit";
-import { v_flex, h_flex } from "gpui-base";
-import { spaces, machines, panes, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout, notify } from "herdr";
-import { repoName, worktreeCount, mainPane, mainCheckout, asleep, spacePlace, orgOf, ORGS, mainAction, pulledText, pullFailure } from "./model.js";
+import { v_flex, h_flex, Popup } from "gpui-base";
+import { spaces, machines, panes, agents, run, openOverlay, exec, hc, theme, shared, setShared, watchFolder, window, layout, notify, home, readTextFile, checking } from "herdr";
+import { repoName, worktreeCount, mainPane, mainCheckout, asleep, spacePlace, orgOf, mainAction, pulledText, pullFailure, orgFace, orgMenu, collieWorkspace, followCollie, linkStatus } from "./model.js";
+
+// Collie, the mac-workspace app. Its core (the console server) is the bridge: it serves the
+// org colors Collie picked at /api/colors, and answering there is what "connected" means.
+// The workspace Collie shows has no endpoint yet, so it is read from Collie's own settings
+// file, the one the core reads the colors from.
+const CORE = "http://127.0.0.1:4317";
+const COLLIE_DIR = () => `${home()}/Library/Application Support/mac-workspace`;
+const COLLIE_APP = "com.samiros.collie";
+// A 6-digit hex color at a share of its strength (theme colors are hex); else the fallback.
+const tint = (c, alpha, fallback) => (/^#[0-9a-f]{6}$/i.test(c ?? "") ? `${c}${alpha}` : fallback);
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -70,18 +80,76 @@ export default class Spaces extends View {
     this.reconnecting = JSON.parse(localStorage.getItem("machines.reconnecting") ?? "{}");
     for (const state of Object.values(this.reconnecting)) state.busy = false;
     this.folded = new Set(JSON.parse(localStorage.getItem("machines.folded") ?? "[]"));
-    // Organization tabs: which one is shown ("all" or an ORGS id), and whether the
-    // bar shows at all (click "Spaces" to hide it; hidden lists every space).
+    // The workspace switcher: which organization is shown ("all" or an ORGS id), and
+    // whether the switcher shows at all (click "Spaces" to hide it; hidden lists every space).
     this.org = localStorage.getItem("spaces.org") ?? "all";
     setShared("spaces.org", this.org);
     this.tabsShown = localStorage.getItem("spaces.tabs") !== "off";
     this.lastActive = null;
+    this.switchOpen = false;
+    this.switchClosedAt = 0;
+    // The link to Collie: its core's last answer ({ok}, null before the first) and the
+    // workspace Collie showed when last read (followCollie).
+    this.link = null;
+    this.collieSeen = null;
+    if (!checking()) {
+      this.refreshLink(cx);
+      cx.timer.every(15000, (cx) => this.refreshLink(cx));
+      this.watchCollie(cx);
+    }
     this.refreshMachines(cx);
     cx.timer.every(15000, cx => this.refreshMachines(cx));
     this.refreshLive(cx);
     cx.timer.every(5000, (cx) => this.refreshLive(cx));
     // Refresh only when the refs could have changed (see `due`).
     cx.timer.every(250, (cx) => this.checkNew(cx));
+  }
+
+  // Collie's core, every 15 s and on a click: reachable or not, and the org colors it serves
+  // (shared as "workspace.colors", as agents-tree does). Then what Collie shows now.
+  refreshLink(cx) {
+    if (this.linking) return;
+    this.linking = true;
+    cx.spawn(async (cx) => {
+      let next;
+      try {
+        const r = await fetch(`${CORE}/api/colors`);
+        next = { ok: r.ok };
+        const got = r.ok ? (await r.json())?.colors ?? null : null;
+        if (got && JSON.stringify(got) !== JSON.stringify(shared("workspace.colors") ?? {})) setShared("workspace.colors", got);
+      } catch {
+        next = { ok: false };
+      }
+      this.linking = false;
+      if (JSON.stringify(next) !== JSON.stringify(this.link)) { this.link = next; cx.notify(); }
+      await this.readCollie(cx);
+    });
+  }
+
+  // Herdr follows Collie: when Collie switches workspace, the list switches with it.
+  async readCollie(cx) {
+    const text = await readTextFile(`${COLLIE_DIR()}/desktop.json`).catch(() => null);
+    const next = followCollie({ org: this.org, seen: this.collieSeen }, collieWorkspace(text));
+    this.collieSeen = next.seen;
+    if (next.org !== this.org) { this.setOrg(next.org); cx.notify(); }
+  }
+
+  // Collie saves its workspace when it switches: follow at once, not only on the 15 s look.
+  watchCollie(cx) {
+    cx.spawn(async (cx) => {
+      try {
+        while (!this.closed) {
+          this.collieWatch = watchFolder(COLLIE_DIR());
+          await this.collieWatch;
+          if (!this.closed) await this.readCollie(cx);
+        }
+      } catch {} // no such folder (Collie never ran here): the 15 s look still reads it
+    });
+  }
+
+  close() {
+    this.closed = true;
+    this.collieWatch?.cancel?.();
   }
 
   refreshLive(cx) {
@@ -301,28 +369,70 @@ export default class Spaces extends View {
     setShared("spaces.org", org);
   }
 
-  // ALL, then each organization with spaces (and the shown one): its count, and a
-  // dot in the needs-you color when an agent in one of its spaces needs you.
-  orgTabs(t) {
-    const rows = this.orgRows ?? [];
-    const tab = (id, label, list) => {
-      const on = this.org === id;
-      const needs = list.some((r) => r.w.status === "blocked");
-      return h_flex().id(`org-${id}`).h(22).px(7).gap(4).flex_none().items_center().rounded(6)
-        .text_size(10.5).font_semibold().text_color(on ? t.foreground : t.dim)
-        .when(on, (el) => el.bg(t.selected))
-        .when(!on, (el) => el.hover((s) => s.bg(t.hover).text_color(t.foreground)))
-        .cursor_pointer()
-        .on_click((_e, cx) => { this.setOrg(id); cx.notify(); })
-        .child(label)
-        .when(id !== "all", (el) => el.child(div().font_normal().text_color(t.dim).child(String(list.length))))
-        .when(needs, (el) => el.child(div().size(5).rounded(3).bg(t.blocked)));
-    };
-    return h_flex().px(8).pb(6).gap(2).flex_none().flex_wrap()
-      .child(tab("all", "ALL", rows))
-      .children(ORGS.map(([id, label]) => [id, label, rows.filter((r) => r.org === id)])
-        .filter(([id, , list]) => list.length || this.org === id)
-        .map(([id, label, list]) => tab(id, label, list)));
+  // An org's tile, as Collie draws it: a rounded square with its initials (All: a stack),
+  // grey on a faint tint of the text color. Orgs have no color here, as in Collie.
+  orgTile(initials, t) {
+    return h_flex().size(24).flex_none().rounded(8).items_center().justify_center()
+      .bg(tint(t.foreground, "1a", t.hover)).text_color(t.muted).text_size(10).font_semibold()
+      .child(initials ? initials : svg("mods/workspace-chrome/layers.svg").size(12));
+  }
+
+  // The workspace switcher, Collie's: one pill (tile, the shown org's name, chevrons) that
+  // opens a menu of every organization with spaces (and the shown one), each with its
+  // count and a dot in the needs-you color when an agent there needs you. A pick filters
+  // the list; the pill wears that dot when an org it hides needs you.
+  orgSwitch(t) {
+    const menu = orgMenu(this.orgRows ?? [], this.org);
+    const face = orgFace(this.org);
+    const hiddenNeeds = this.org !== "all" && menu.some((m) => m.id !== "all" && !m.on && m.needs);
+    const close = () => { this.switchOpen = false; this.switchClosedAt = Date.now(); };
+    const trigger = h_flex().id("org-switch-pill").w_full().h(36).px(8).gap(8).items_center().rounded(12)
+      .bg(t.raised).hover((s) => s.bg(t.selected)).cursor_pointer()
+      .tooltip("Workspace: follows the one Collie shows")
+      .on_click((_e, cx) => {
+        // The press that closed the menu (outside it) is this click's own: leave it closed.
+        if (Date.now() - this.switchClosedAt < 300) return;
+        this.switchOpen = !this.switchOpen;
+        cx.notify();
+      })
+      .child(this.orgTile(face.initials, t))
+      .child(div().flex_1().min_w(0).truncate().text_size(13).font_medium().text_color(t.foreground).child(face.label))
+      .when(hiddenNeeds, (el) => el.child(div().size(6).rounded(3).flex_none().bg(t.blocked)))
+      .child(svg("mods/spaces-ws/chevrons-up-down.svg").size(13).flex_none().text_color(t.dim));
+    const item = (m) => h_flex().id(`org-${m.id}`).h(32).px(8).gap(8).items_center().rounded(8)
+      .cursor_pointer().hover((s) => s.bg(t.hover))
+      .on_click((_e, cx) => { close(); this.setOrg(m.id); cx.notify(); })
+      .child(this.orgTile(m.initials, t))
+      .child(div().flex_1().min_w(0).truncate().text_size(13)
+        .text_color(m.on ? t.foreground : t.muted).when(m.on, (el) => el.font_semibold()).child(m.label))
+      .when(m.needs, (el) => el.child(div().size(6).rounded(3).flex_none().bg(t.blocked)))
+      .child(div().flex_none().text_size(12).text_color(t.dim).child(String(m.count)))
+      .child(div().w(14).flex_none().when(m.on, (el) => el.child(svg("mods/workspace-chrome/check.svg").size(13).text_color(t.accent))));
+    const content = v_flex().w(252).mt(6).p(4).gap(1).rounded(12).border_1().border_color(t.border).bg(t.popover)
+      .on_mouse_down_out((_e, cx) => { if (this.switchOpen) { close(); cx.notify(); } })
+      .child(div().px(8).pt(4).pb(2).text_size(11).font_semibold().text_color(t.dim).child("Workspaces"))
+      .children(menu.map(item));
+    return div().px(8).pb(8).flex_none()
+      .child(Popup.new("org-switch", trigger).w_full().anchor("top_left")
+        .when(this.switchOpen, (el) => el.content(content)));
+  }
+
+  // How the link to Collie is: a quiet dot and Collie's words beside the title; amber and
+  // "sheep loose" only when its core doesn't answer. Click: retry, or open Collie.
+  linkBadge(t) {
+    const working = agents().filter((a) => a.status === "working").length;
+    const s = linkStatus(this.link, working);
+    const dot = s.loose ? t.ansi3 : this.link ? tint(t.ansi2, "99", t.dim) : t.dim;
+    return h_flex().id("collie-link").flex_none().h(22).px(6).gap(5).items_center().rounded(6)
+      .text_size(11).text_color(s.loose ? t.ansi3 : t.dim)
+      .cursor_pointer().hover((st) => st.bg(t.hover)).tooltip(s.tip)
+      .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+      .on_click((_e, cx) => {
+        if (s.loose || !this.link) this.refreshLink(cx);
+        else exec("open", ["-b", COLLIE_APP]).catch(() => {});
+      })
+      .child(div().size(6).rounded(3).flex_none().bg(dot))
+      .child(s.text);
   }
 
   // Entering a space lands on its main checkout's pane, where the orchestrator
@@ -625,24 +735,25 @@ export default class Spaces extends View {
       changed = true;
     }
     if (changed) setShared("space.colors", kept);
-    // The rows first: they fill this.orgRows, which the tabs count.
+    // The rows first: they fill this.orgRows, which the switcher counts.
     const rows = this.grouped(t, collapsed);
     return v_flex().size_full().min_h(0).bg(t.chrome).text_size(13)
       .child(h_flex().h(31).pl(16).pr(10).items_center().justify_between().text_size(11.5).text_color(t.dim)
         .when(collapsed, el => el.pl(0).pr(0).justify_center())
-        .when(!collapsed, el => el.child(div().id("spaces-title").cursor_pointer().hover((s) => s.text_color(t.foreground))
-          .tooltip(this.tabsShown ? "Hide organization tabs" : "Show organization tabs")
+        .when(!collapsed, el => el.child(div().id("spaces-title").flex_1().cursor_pointer().hover((s) => s.text_color(t.foreground))
+          .tooltip(this.tabsShown ? "Hide the workspace switcher" : "Show the workspace switcher")
           .on_click((_e, cx) => {
             this.tabsShown = !this.tabsShown;
             try { localStorage.setItem("spaces.tabs", this.tabsShown ? "on" : "off"); } catch {}
             cx.notify();
           })
-          .child("Spaces")))
+          .child("Spaces"))
+          .child(this.linkBadge(t)))
         .child(div().id("space-new").size(26).flex_none().flex().items_center().justify_center().rounded(6).hover(s => s.bg(t.hover).text_color(t.foreground))
           // The project picker, on the organization shown (ALL starts on AG).
           .on_click(() => openOverlay({ mod: "space-picker", kind: "dialog", width: 520, height: 460, props: { org: this.org === "all" ? "ag" : this.org } }))
           .child(svg("mods/workspace-chrome/plus.svg").size(14))))
-      .when(!collapsed && this.tabsShown, (el) => el.child(this.orgTabs(t)))
+      .when(!collapsed && this.tabsShown, (el) => el.child(this.orgSwitch(t)))
       .child(v_flex().flex_1().min_h(0).px(collapsed ? 0 : 8).pb(14).overflow_y_scrollbar().mode("always")
         .on_mouse_up("left", (_e, cx) => { this.pressed = null; cx.notify(); })
         .children(rows)
