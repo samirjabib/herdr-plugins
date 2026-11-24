@@ -302,12 +302,13 @@ code you don't know as a failure, as you read 1.
 - The other files in the state folder (`accounts.json`, `settings.json`,
   `usage-state.json`, `restart.json`, `pending-switch.json`, `live/`,
   `login-link`, `lock/`): read `accounts.v1.json` instead.
-  One exception: agent-sleep reads `accounts.json` (a top-level array, each
-  element's `configDir`) to find the folders a Claude's session file can be
-  in.
+  Two exceptions read `accounts.json` (a top-level array): agent-sleep, each
+  element's `configDir`, to find the folders a Claude's session file can be
+  in; and the `claude` launcher, each element's `configDir`, `org` and
+  `email`, for the account part of a session's name.
 - `active` (the active account's config folder, the exact string, empty for
   System default) is read by two outside readers, which take its first line
-  as is: a `claude` launcher script, which starts every new
+  as is: the `claude` launcher (`mods/claude-accounts/bin/claude`), which starts every new
   Claude in a Herdr terminal on it, and agent-sleep, which wakes a sleeping
   Claude on it (`claude-session.js`, `loadWakeAccount`). Writing anything
   but the exact folder on its first line breaks both. Other plugins read
