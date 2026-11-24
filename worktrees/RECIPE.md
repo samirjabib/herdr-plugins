@@ -111,35 +111,48 @@ go to sleep and come back where they were.
   its tabs and splits stay, and other programs in front (dev servers) are
   stopped too.
 - **Agents tree** (`agents-tree`, a copy of Herdr's `agents` that keeps its look).
-  The Workspace Boss (`orch-workspace`, a `workspace boss` tag) on top; under it,
-  on tree lines, each org's orchestrator (`orch-cs`, `orch-ag`, `orch-personal`,
-  a quiet `orchestrator` tag in its org's color from the mac-workspace app's
-  core, else its space's), muted with `off` when not running; under each, its
-  org's projects with live agents (by the agent's folder:
-  `<org>/<project>/main|worktrees/...`). A project row IS its lead on main: the
-  project's orchestrator (`orch-<org>-<project>`), else the agent in its main
-  checkout (the first, or the most urgent under Priority). There is no `main`
-  header: other agents and background terminals on main hang right under the
-  project row, then one header per worktree (its folder name), each folding
-  with a chevron and holding its agents (several in one checkout stay
-  together) and background terminals. A worker
-  row says the task (a named tab or the agent's title), the time in its state,
-  and the state; outside a checkout group (pinned) it keeps a `⑂ main` /
-  `⑂ <worktree>` tag. Agents outside the orgs sit under `Other`.
+  The Workspace Boss (`orch-workspace`) on top; under it, on tree lines, each
+  org's lead (`orch-cs`, `orch-ag`, `orch-personal`), muted with `off` when not
+  running; under each, its org's projects (by the agent's folder:
+  `<org>/<project>/main|worktrees/...`). A project row IS its lead on main;
+  under it, the main checkout's background terminals (no `main` header), then
+  one header per worktree (its folder name) holding its worker and background
+  terminals. Agents outside the orgs sit under `Other`.
+  - **One row per folder, helpers as a count.** Each level has one owner row:
+    the Boss at `~/mac-workspace`, an org lead at `~/mac-workspace/<org>`, a
+    project's lead on main (its `orch-<org>-<project>`, else the first or most
+    urgent agent there), a worktree's worker (its first or most urgent agent).
+    An owner may be asleep: live agents win, else the sleeping orchestrator,
+    else the most recent sleeper. Every other agent or sleeper in that folder
+    is a helper: no row of its own, only a quiet `N helpers` on the owner's
+    row (hover: names and states; colored when one is blocked or done; a
+    click unfolds them as rows under the owner, again folds). An off seat
+    owns nothing: its root agents keep their rows, as do the Boss's when no
+    Boss runs.
+  - **Role marks**: no text chips. One small collie glyph (`collie.svg`,
+    currentColor) per role, no box, its tooltip naming the role: Workspace
+    Boss (amber), Org lead (its org's color from the mac-workspace app's core,
+    else its space's), Project lead on main (accent), Worker in `<worktree>`
+    (muted), Helper (dim). The place chip is as quiet: a branch glyph and
+    `main` or the worktree, dim. The sleep countdown is dim text (`zzz 14m`).
   The tree follows the Spaces workspace switcher (and so Collie): `spaces.org`
   (`all`, `cs`, `ag`, `personal`, `other`); an org picked shows the Boss, that
-  org's orchestrator and its agents. Seats, projects and agents fold with a
+  org's lead and its agents. Seats, projects and agents fold with a
   chevron; pinned agents leave the tree for a `Pinned` group on top; the sort
   (Priority / Grouped) orders projects and workers.
-  - **Project row**: the lead's program icon, the project name, then only what needs saying: `⚠ <branch>` when its
+  - **Project row**: looks the same with its lead live or asleep: the lead's
+    icon, the project name, the `main` chip, the project-lead mark, then only
+    what needs saying: `⚠ <branch>` when its
     main checkout is on another branch, `↓N` when local main is behind
     `origin/main` (as last fetched; never fetches), `⑂ N` registered worktrees
     and a GitHub mark when a remote points there. Read from `.git/HEAD`,
     `.git/config` and `.git/worktrees` every 15 s, `git rev-list` once a
-    minute, never during a check. Then the lead's processes chip, sleep
-    countdown and state; its sub-agents hang under the row. Click: focuses the
-    lead. With no agent on main it reads like an off seat: a muted folder and
-    name, no state, and a click opens the space its first worker is in.
+    minute, never during a check. Then the helper count; live, the lead's
+    processes chip, sleep countdown and state, its sub-agents under the row,
+    and a click focuses it; asleep, it is dimmed with the animated zzz, the
+    recap on hover and a Wake button. With nothing on main, live or asleep, it
+    reads like an off seat: a muted folder and name, no tag or state, and a
+    click opens the space its first worker is in.
   - **Processes** (`>_ N` on an agent row, folded by default): the live
     processes under the agent's terminal (one `ps -axo pid,ppid,pcpu,rss,command`
     every 5 s while the sidebar is wide; the terminal's pid from `hc get`),

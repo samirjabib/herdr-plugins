@@ -52,13 +52,17 @@ export const ORG_SEATS = ["cs", "ag", "personal", "other"];
 const byUrgency = (x, y) => y.rank - x.rank || y.since - x.since || y.seq - x.seq;
 
 // The tree. `list`: agents in the list's order, each { address, name, cwd, rank, since, seq,
-// pinned, space }. Returns { boss, pinned, jobs, root, seats: [{ org, orch, projects, loose }] }:
-// `root` the agents and background terminals at the workspace root: the Boss's helpers, shown at its level; each
-// project { org, name, base, orch, lead, workers, main, checkouts, rank, since }: `lead` the agent
-// the project row IS (its orchestrator orch-<org>-<project>, else the first agent in the main
-// checkout; null when none runs there), `workers` every other agent, `main` the other agents and
-// background terminals in the main checkout ({ workers, background }, right under the lead),
-// `checkouts` each worktree's ({ place, workers, background }, as first met); `loose` the org's agents outside a
+// pinned, space }. Returns { boss, helpers, pinned, jobs, root, seats: [{ org, orch, helpers, projects, loose }] }.
+// Helpers: agents in the same folder as a row's owner get no row; the owner carries them as a
+// badge. `helpers` the other agents at the workspace root (the Boss's), a seat's `helpers` the
+// other agents at its org root (only while its orchestrator runs; an off seat keeps them in
+// `loose`); `root` the background terminals at the workspace root; each
+// project { org, name, base, orch, lead, helpers, workers, main, checkouts, rank, since }: `lead`
+// the agent the project row IS (its orchestrator orch-<org>-<project>, else the first agent in
+// the main checkout; null when none runs there), `helpers` the other agents on main, `workers`
+// every agent but the lead, `main` the background terminals in the main checkout ({ background },
+// right under the lead), `checkouts` each worktree's ({ place, lead, helpers, workers, background }:
+// `lead` its first agent, the row, `helpers` the rest; as first met); `loose` the org's agents outside a
 // project. Under All every org seat shows (an off one too) and Other only with agents; an org
 // picked shows only its seat. Pinned workers leave the tree (orchestrators keep their seat).
 // byPriority: projects and workers by urgency, then recency; else in the list's order.
@@ -68,16 +72,17 @@ const byUrgency = (x, y) => y.rank - x.rank || y.since - x.since || y.seq - x.se
 // root under the Boss (`jobs`), an org's root under its seat, a project under its row; a
 // background terminal under its project's row (`background`), else in its seat's `loose`.
 export function buildTree(list, { org = "all", byPriority = false, extras = [] } = {}) {
-  const boss = list.find((a) => orchOf(a.name) === "workspace") ?? null;
+  let boss = list.find((a) => orchOf(a.name) === "workspace") ?? null;
   const pinned = [];
   const jobs = [];
-  const root = []; // agents and background terminals at the workspace root: the Boss's own
-  const seats = new Map(ORG_SEATS.map((o) => [o, { org: o, orch: null, projects: [], loose: [], jobs: [] }]));
+  const helpers = []; // agents and sleepers at the workspace root: the Boss's helpers
+  const seats = new Map(ORG_SEATS.map((o) => [o, { org: o, orch: null, helpers: [], projects: [], loose: [], jobs: [] }]));
   const projects = new Map();
+  const listed = new Set(list);
   const projectNode = (p) => {
     const key = `${p.org}/${p.name}`;
     if (!projects.has(key)) {
-      const node = { ...p, orch: null, lead: null, workers: [], main: { workers: [], background: [] }, checkouts: [], jobs: [], background: [], rank: 0, since: 0, seq: 0 };
+      const node = { ...p, orch: null, lead: null, helpers: [], workers: [], main: { background: [] }, checkouts: [], jobs: [], background: [], rank: 0, since: 0, seq: 0 };
       projects.set(key, node);
       seats.get(p.org).projects.push(node);
     }
@@ -88,7 +93,7 @@ export function buildTree(list, { org = "all", byPriority = false, extras = [] }
     const seatOrg = orchOf(a.name);
     if (seatOrg) { seats.get(seatOrg).orch ??= a; continue; }
     if (a.pinned) { pinned.push(a); continue; }
-    if (orgRootOf(a.cwd) === "workspace") { root.push(a); continue; }
+    if (orgRootOf(a.cwd) === "workspace") { helpers.push(a); continue; }
     const p = projectOf(a.cwd);
     const seat = seats.get(p?.org ?? orgOfDir(a.cwd));
     if (!p) { seat.loose.push(a); continue; }
@@ -106,12 +111,17 @@ export function buildTree(list, { org = "all", byPriority = false, extras = [] }
     const p = projectOf(x.cwd);
     const root = orgRootOf(x.cwd);
     const seat = seats.get(p?.org ?? (root && root !== "workspace" ? root : orgOfDir(x.cwd)));
+    // A sleeping orchestrator holds its seat (the Boss's too) while no live one does.
+    const sleepingOrch = x.sleeping ? orchOf(x.name) : null;
+    if (sleepingOrch === "workspace") boss ??= x;
+    else if (sleepingOrch) seats.get(sleepingOrch).orch ??= x;
+    if (sleepingOrch) continue;
     if (isJob(x.name)) {
       if (p) projectNode(p).jobs.push(x);
       else if (root === "workspace") jobs.push(x);
       else seat.jobs.push(x);
     } else if (p) projectNode(p).background.push(x);
-    else if (root === "workspace") rootTerms.push(x);
+    else if (root === "workspace") (x.sleeping ? helpers : rootTerms).push(x);
     else seat.loose.push(x);
   }
   if (byPriority) {
@@ -121,28 +131,54 @@ export function buildTree(list, { org = "all", byPriority = false, extras = [] }
       seat.loose.sort(byUrgency);
     }
   }
-  for (const seat of seats.values()) for (const p of seat.projects) leadAndCheckouts(p);
+  for (const seat of seats.values()) {
+    for (const p of seat.projects) leadAndCheckouts(p);
+    if (!seat.orch) continue;
+    const atRoot = (x) => (listed.has(x) || x.sleeping) && orgRootOf(x.cwd) === seat.org;
+    seat.helpers = seat.loose.filter(atRoot);
+    seat.loose = seat.loose.filter((x) => !atRoot(x));
+  }
   const shown = (s) => (org === "all" ? s.org !== "other" || s.projects.length || s.loose.length || s.jobs.length : s.org === org);
-  return { boss, pinned, jobs, root: [...root, ...rootTerms], seats: [...seats.values()].filter(shown) };
+  return { boss, helpers, pinned, jobs, root: rootTerms, seats: [...seats.values()].filter(shown) };
 }
 
-// A project's lead (its orchestrator, else its first agent on main, taken out of `workers`),
-// the rest of the main checkout (`main`), and each worktree's agents and background terminals
-// (`checkouts`, in the order first met); each group keeps its order.
+// A project's lead (its orchestrator, else its first agent on main, taken out of `workers`;
+// with no live one there, its sleeping orchestrator, else its most recent sleeper on main), its
+// helpers (the other agents and sleepers on main), the main checkout's background terminals
+// (`main`), and each worktree's (`checkouts`, in the order first met: the same lead rule, live
+// agents first, the rest its helpers). `background` keeps every terminal and sleeper (the zzz count).
 function leadAndCheckouts(p) {
   const onMain = (x) => (placeOf(x.cwd) ?? "main") === "main";
-  p.lead = p.orch ?? p.workers.find(onMain) ?? null;
+  const recent = (xs) => [...xs].sort((x, y) => (y.since ?? 0) - (x.since ?? 0));
+  const sleepers = p.background.filter((x) => x.sleeping);
+  const mainSleepers = recent(sleepers.filter(onMain));
+  p.lead = p.orch ?? p.workers.find(onMain)
+    ?? mainSleepers.find((x) => projectOrchOf(x.name)?.project === p.name) ?? mainSleepers[0] ?? null;
   if (p.lead && p.lead !== p.orch) p.workers = p.workers.filter((a) => a !== p.lead);
+  p.helpers = [...p.workers.filter(onMain), ...mainSleepers.filter((x) => x !== p.lead)];
+  p.main = { background: [] };
   const groups = new Map();
   const at = (x) => {
     if (onMain(x)) return p.main;
     const place = placeOf(x.cwd);
-    if (!groups.has(place)) groups.set(place, { place, workers: [], background: [] });
+    if (!groups.has(place)) groups.set(place, { place, lead: null, helpers: [], workers: [], background: [], sleepers: [] });
     return groups.get(place);
   };
-  for (const a of p.workers) at(a).workers.push(a);
-  for (const b of p.background) at(b).background.push(b);
+  for (const a of p.workers) if (!onMain(a)) at(a).workers.push(a);
+  for (const b of p.background) if (!b.sleeping) at(b).background.push(b);
+  for (const z of sleepers) if (!onMain(z)) at(z).sleepers.push(z);
   p.checkouts = [...groups.values()];
+  for (const c of p.checkouts) {
+    [c.lead = null, ...c.helpers] = [...c.workers, ...recent(c.sleepers)];
+    delete c.sleepers;
+  }
+}
+
+// How a project row looks: the same name and `main` tag whether its lead is live or asleep
+// (asleep only dims it and adds the zzz); with nothing on main, a muted folder and no tag.
+export function projectLook(p) {
+  const lead = p?.lead ?? null;
+  return { name: p?.name, tag: lead ? "main" : null, asleep: Boolean(lead?.sleeping), dim: !lead || Boolean(lead.sleeping), folder: !lead };
 }
 
 // The branch a HEAD file names ("" when detached), null when it couldn't be read.
@@ -395,8 +431,50 @@ export function sleepsIn(at, now) {
 // How many sleeping agents a project, or an org seat (its projects and loose rows), holds.
 export function asleepIn(node) {
   const own = (list) => (list ?? []).filter((x) => x?.sleeping).length;
-  if (node?.projects) return node.projects.reduce((n, p) => n + own(p.background), 0) + own(node.loose);
+  if (node?.projects) return node.projects.reduce((n, p) => n + own(p.background), 0) + own(node.loose) + own(node.helpers) + own([node.orch]);
   return own(node?.background);
+}
+
+// A row owner's helper badge: "N helper(s)", a hover listing each helper's name and state, and
+// `need` the most urgent state that needs you (blocked, then done), else null. Null without helpers.
+export function helperBadge(helpers, labelOf) {
+  if (!helpers?.length) return null;
+  const need = ["blocked", "done"].find((s) => helpers.some((h) => h.status === s)) ?? null;
+  return {
+    text: `${helpers.length} helper${helpers.length === 1 ? "" : "s"}`,
+    tip: helpers.map((h) => `${labelOf(h) || h.address} · ${h.sleeping ? "asleep" : h.status}`).join("\n"),
+    need,
+  };
+}
+
+// A role's quiet mark (one collie glyph, tinted per role by the view): the role and a
+// one-line tooltip. `place`: a worker's worktree. Null for an unknown role.
+const ROLE_TIPS = { boss: "Workspace Boss", org: "Org lead", project: "Project lead on main", helper: "Helper" };
+export function roleMark(role, place) {
+  if (role === "worker") return { role, tip: `Worker in ${place}` };
+  return ROLE_TIPS[role] ? { role, tip: ROLE_TIPS[role] } : null;
+}
+
+// Every placed agent's role mark, by address: the Boss, each org lead, each project lead, each
+// worktree's worker (its lead), and every helper (the others in the same folder as one of them).
+export function roleOf(tree) {
+  const roles = new Map();
+  const put = (a, role, place) => a && roles.set(a.address, roleMark(role, place));
+  put(tree.boss, "boss");
+  for (const h of tree.helpers ?? []) put(h, "helper");
+  for (const s of tree.seats ?? []) {
+    put(s.orch, "org");
+    for (const h of s.helpers ?? []) put(h, "helper");
+    for (const p of s.projects) {
+      put(p.lead, "project");
+      for (const h of p.helpers) put(h, "helper");
+      for (const c of p.checkouts) {
+        put(c.lead, "worker", c.place);
+        for (const h of c.helpers) put(h, "helper");
+      }
+    }
+  }
+  return roles;
 }
 
 // The names of the Boss's helpers (agents at the workspace root): one whose name copies the

@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  helperLabels,
+  helperLabels, helperBadge, projectLook, roleMark, roleOf,
   projectOf, projectOrchOf, buildTree, headBranch, hasGithub, projectSummary,
   parsePs, shortCmd, processRows, formatMem, processTree, plumbingNote, procTotal,
   bgState, bgLabel, bgVisible, jobInfo, placeOf, orgRootOf, sleepersOf, sleepTip, sleepEtas, sleepsIn, asleepIn,
@@ -278,8 +278,8 @@ test("a project's lead is its orchestrator on main; worktrees hang under it, wit
   // The project row IS its lead: the project orchestrator wins over another agent on main.
   assert.equal(shop.lead.address, "t5");
   assert.equal(shop.orch.address, "t5");
-  // Other agents and terminals on main sit right under the lead, with no "main" header.
-  assert.deepEqual([shop.main.workers.map((w) => w.address), shop.main.background.map((b) => b.address)], [["t2"], ["b2"]]);
+  // Other agents on main are the lead's helpers; terminals on main sit right under it, with no "main" header.
+  assert.deepEqual([shop.helpers.map((w) => w.address), shop.main.background.map((b) => b.address)], [["t2"], ["b2"]]);
   assert.deepEqual(shop.checkouts.map((c) => [c.place, c.workers.map((w) => w.address), c.background.map((b) => b.address)]), [
     ["fix-cart", ["t1", "t4"], []],
     ["nav", ["t3"], ["b1"]],
@@ -293,7 +293,7 @@ test("with no project orchestrator, the first agent in the main checkout is the 
   const p = tree.seats.find((s) => s.org === "ag").projects[0];
   assert.equal(p.lead.address, "t2");
   assert.equal(p.orch, null);
-  assert.deepEqual(p.main.workers.map((w) => w.address), ["t3"]);
+  assert.deepEqual(p.helpers.map((w) => w.address), ["t3"]);
   assert.deepEqual(p.workers.map((w) => w.address), ["t1", "t3"]);
   assert.deepEqual(p.checkouts.map((c) => [c.place, c.workers.map((w) => w.address)]), [["a", ["t1"]]]);
 });
@@ -310,7 +310,7 @@ test("byPriority picks the most urgent agent on main as the lead and orders the 
   const tree = buildTree([ag("t1", `${R}/cs/site/main`, { rank: 1 }), ag("t2", `${R}/cs/site/main`, { rank: 4 }), ag("t3", `${R}/cs/site/main`, { rank: 2 })], { byPriority: true });
   const site = tree.seats.find((s) => s.org === "cs").projects[0];
   assert.equal(site.lead.address, "t2");
-  assert.deepEqual(site.main.workers.map((w) => w.address), ["t3", "t1"]);
+  assert.deepEqual(site.helpers.map((w) => w.address), ["t3", "t1"]);
   assert.deepEqual(site.checkouts, []);
 });
 
@@ -328,7 +328,8 @@ test("sleepersOf keeps the core's sleeping agents as tree extras under their che
   assert.deepEqual(sleepersOf(null), []);
   const tree = buildTree([], { extras: got });
   const site = tree.seats.find((s) => s.org === "cs").projects[0];
-  assert.deepEqual(site.checkouts.map((c) => [c.place, c.background.map((b) => b.name)]), [["hcp", ["hcp"]]]);
+  // A worktree whose only agent sleeps has that sleeper as its row.
+  assert.deepEqual(site.checkouts.map((c) => [c.place, c.lead.name, c.background]), [["hcp", "hcp", []]]);
 });
 
 test("sleepTip says how long, the recap's first lines, and that a click wakes it", () => {
@@ -370,7 +371,9 @@ test("an agent at the workspace root sits under the Boss, not in Other; Other ke
     ag("t2", R, { name: "engram-cloud" }),
     ag("t3", "/Users/x/Desktop"),
   ], { extras: [{ address: "b1", name: null, cwd: R }] });
-  assert.deepEqual(tree.root.map((a) => a.address), ["t2", "b1"]);
+  // Other Claudes at the root are the Boss's helpers (a badge, not rows); terminals stay rows.
+  assert.deepEqual(tree.helpers.map((a) => a.address), ["t2"]);
+  assert.deepEqual(tree.root.map((a) => a.address), ["b1"]);
   const other = tree.seats.find((s) => s.org === "other");
   assert.deepEqual(other.loose.map((a) => a.address), ["t3"]);
   // With nothing outside the workspace, Other is hidden.
@@ -384,4 +387,133 @@ test("helpers at the workspace root never read as a second Workspace Boss: a cop
   assert.deepEqual([...got], [["h1", "Helper 1"], ["h3", "Helper 2"], ["h4", "Helper 3"]]);
   const one = helperLabels(["h1", "h2"], "Workspace Boss", (k) => names[k]);
   assert.deepEqual([...one], [["h1", "Helper"]]);
+});
+
+test("helpers at every level: agents in the same folder as a row's owner are its helpers, never rows of their own", () => {
+  const tree = buildTree([
+    ag("t1", R, { name: "orch-workspace" }),
+    ag("t2", R), ag("t3", R),
+    ag("t4", `${R}/ag`, { name: "orch-ag" }),
+    ag("t5", `${R}/ag`),
+    ag("t6", `${R}/ag/shop/main`), ag("t7", `${R}/ag/shop/main/src`),
+    ag("t8", `${R}/ag/shop/worktrees/nav`), ag("t9", `${R}/ag/shop/worktrees/nav`),
+    ag("t10", `${R}/cs`),
+  ]);
+  // The Boss + other Claudes at ~/mac-workspace.
+  assert.deepEqual(tree.helpers.map((a) => a.address), ["t2", "t3"]);
+  // An org orchestrator + other agents at ~/mac-workspace/<org>; they leave `loose`.
+  const agSeat = tree.seats.find((s) => s.org === "ag");
+  assert.deepEqual(agSeat.helpers.map((a) => a.address), ["t5"]);
+  assert.deepEqual(agSeat.loose, []);
+  // A project lead + other agents on main.
+  const shop = agSeat.projects[0];
+  assert.equal(shop.lead.address, "t6");
+  assert.deepEqual(shop.helpers.map((a) => a.address), ["t7"]);
+  // A worktree: its first agent is the row, the rest its helpers.
+  assert.deepEqual(shop.checkouts.map((c) => [c.place, c.lead.address, c.helpers.map((a) => a.address)]), [["nav", "t8", ["t9"]]]);
+  // An off seat has no row to own helpers: its root agents stay rows.
+  const cs = tree.seats.find((s) => s.org === "cs");
+  assert.deepEqual([cs.helpers, cs.loose.map((a) => a.address)], [[], ["t10"]]);
+});
+
+test("a worktree's most urgent agent is its row under Priority", () => {
+  const tree = buildTree([ag("t1", `${R}/ag/shop/worktrees/nav`, { rank: 1 }), ag("t2", `${R}/ag/shop/worktrees/nav`, { rank: 4 })], { byPriority: true });
+  const [c] = tree.seats.find((s) => s.org === "ag").projects[0].checkouts;
+  assert.deepEqual([c.lead.address, c.helpers.map((a) => a.address)], ["t2", ["t1"]]);
+});
+
+test("helperBadge counts the helpers, lists names and states on hover, and colors only when one needs you", () => {
+  const names = { h1: "engram-cloud", h2: "Helper 2", h3: "tests" };
+  const label = (a) => names[a.address];
+  assert.equal(helperBadge([], label), null);
+  assert.deepEqual(helperBadge([{ address: "h1", status: "idle" }], label), { text: "1 helper", tip: "engram-cloud · idle", need: null });
+  const many = helperBadge([{ address: "h1", status: "working" }, { address: "h2", status: "done" }, { address: "h3", status: "blocked" }], label);
+  assert.deepEqual(many, { text: "3 helpers", tip: "engram-cloud · working\nHelper 2 · done\ntests · blocked", need: "blocked" });
+  assert.equal(helperBadge([{ address: "h1", status: "working" }, { address: "h2", status: "done" }], label).need, "done");
+  assert.equal(helperBadge([{ address: "h1", status: "working" }], label).need, null);
+});
+
+const zz = (name, cwd, since = 0) => ({ address: `sleep:${name}`, name, title: name, cwd, sleeping: true, since, recap: null });
+
+test("screenshot lids-hd-agent-v2: a project whose only session on main sleeps has that sleeper as its row, no folder row", () => {
+  const tree = buildTree([], { extras: [zz("lids-session", `${R}/ag/lids-hd-agent-v2/main`, 5)] });
+  const p = tree.seats.find((s) => s.org === "ag").projects[0];
+  assert.equal(p.lead.address, "sleep:lids-session");
+  assert.deepEqual([p.helpers, p.main.background, p.checkouts], [[], [], []]);
+});
+
+test("screenshot cro-loop: a live lead on main wins; an older sleeping session there is its helper, not a row", () => {
+  const tree = buildTree([ag("t1", `${R}/ag/cro-loop/main`)], { extras: [zz("old-session", `${R}/ag/cro-loop/main`, 5)] });
+  const p = tree.seats.find((s) => s.org === "ag").projects[0];
+  assert.equal(p.lead.address, "t1");
+  assert.deepEqual(p.helpers.map((a) => a.address), ["sleep:old-session"]);
+  assert.deepEqual(p.main.background, []);
+});
+
+test("a sleeping lead: the project orchestrator first, else the most recent sleeper; the rest are helpers", () => {
+  const sleepers = [zz("a", `${R}/ag/shop/main`, 9), zz("orch-ag-shop", `${R}/ag/shop/main`, 1), zz("b", `${R}/ag/shop/main`, 20)];
+  const withOrch = buildTree([], { extras: sleepers }).seats.find((s) => s.org === "ag").projects[0];
+  assert.equal(withOrch.lead.name, "orch-ag-shop");
+  assert.deepEqual(withOrch.helpers.map((a) => a.name), ["b", "a"]);
+  const noOrch = buildTree([], { extras: sleepers.filter((x) => x.name !== "orch-ag-shop") }).seats.find((s) => s.org === "ag").projects[0];
+  assert.equal(noOrch.lead.name, "b");
+  // Sleepers still count toward the zzz of the project and the seat.
+  assert.equal(asleepIn(noOrch), 2);
+});
+
+test("a worktree's lead may sleep too: live agents first, else the most recent sleeper; other sleepers are helpers", () => {
+  const live = buildTree([ag("t1", `${R}/ag/shop/worktrees/nav`)], { extras: [zz("s1", `${R}/ag/shop/worktrees/nav`, 3), { address: "b1", name: null, cwd: `${R}/ag/shop/worktrees/nav` }] });
+  const [c] = live.seats.find((s) => s.org === "ag").projects[0].checkouts;
+  assert.deepEqual([c.lead.address, c.helpers.map((a) => a.address), c.background.map((b) => b.address)], ["t1", ["sleep:s1"], ["b1"]]);
+  const asleep = buildTree([], { extras: [zz("s1", `${R}/ag/shop/worktrees/nav`, 3), zz("s2", `${R}/ag/shop/worktrees/nav`, 8)] });
+  const [d] = asleep.seats.find((s) => s.org === "ag").projects[0].checkouts;
+  assert.deepEqual([d.lead.name, d.helpers.map((a) => a.name)], ["s2", ["s1"]]);
+});
+
+test("an org orchestrator or the Boss asleep is its seat's row; sleepers in the same folder are helpers", () => {
+  const tree = buildTree([ag("t5", `${R}/ag`)], { extras: [zz("orch-ag", `${R}/ag`), zz("orch-workspace", R), zz("notes", R), zz("ag-notes", `${R}/ag`)] });
+  assert.equal(tree.boss.address, "sleep:orch-workspace");
+  assert.deepEqual([tree.helpers.map((a) => a.address), tree.root], [["sleep:notes"], []]);
+  const agSeat = tree.seats.find((s) => s.org === "ag");
+  assert.equal(agSeat.orch.address, "sleep:orch-ag");
+  assert.deepEqual([agSeat.helpers.map((a) => a.address), agSeat.loose], [["t5", "sleep:ag-notes"], []]);
+  // A live orchestrator beats a sleeping one.
+  const live = buildTree([ag("t2", `${R}/ag`, { name: "orch-ag" })], { extras: [zz("orch-ag", `${R}/ag`)] });
+  assert.equal(live.seats.find((s) => s.org === "ag").orch.address, "t2");
+});
+
+test("helperBadge says a sleeping helper is asleep", () => {
+  assert.equal(helperBadge([zz("notes", R)], (a) => a.title).tip, "notes · asleep");
+});
+
+test("a project row looks the same with its lead live or asleep: same name and main tag; asleep only dims it and adds the zzz", () => {
+  const live = projectLook({ name: "cro-loop", lead: ag("t1", `${R}/ag/cro-loop/main`) });
+  const asleep = projectLook({ name: "cro-loop", lead: zz("s", `${R}/ag/cro-loop/main`) });
+  assert.deepEqual(live, { name: "cro-loop", tag: "main", asleep: false, dim: false, folder: false });
+  assert.deepEqual(asleep, { name: "cro-loop", tag: "main", asleep: true, dim: true, folder: false });
+  // Nothing on main, live or asleep: the muted folder row, no tag.
+  assert.deepEqual(projectLook({ name: "shop", lead: null }), { name: "shop", tag: null, asleep: false, dim: true, folder: true });
+});
+
+test("roleMark: one quiet collie mark per level, its tooltip naming the role in one line", () => {
+  assert.deepEqual(roleMark("boss"), { role: "boss", tip: "Workspace Boss" });
+  assert.deepEqual(roleMark("org"), { role: "org", tip: "Org lead" });
+  assert.deepEqual(roleMark("project"), { role: "project", tip: "Project lead on main" });
+  assert.deepEqual(roleMark("worker", "nav"), { role: "worker", tip: "Worker in nav" });
+  assert.deepEqual(roleMark("helper"), { role: "helper", tip: "Helper" });
+  assert.equal(roleMark("nobody"), null);
+});
+
+test("roleOf gives every placed agent its role: Boss, org lead, project lead, worktree worker, helper", () => {
+  const tree = buildTree([
+    ag("t1", R, { name: "orch-workspace" }), ag("t2", R),
+    ag("t3", `${R}/ag`, { name: "orch-ag" }), ag("t4", `${R}/ag`),
+    ag("t5", `${R}/ag/shop/main`), ag("t6", `${R}/ag/shop/main`),
+    ag("t7", `${R}/ag/shop/worktrees/nav`), ag("t8", `${R}/ag/shop/worktrees/nav`),
+  ], { extras: [zz("s1", `${R}/ag/shop/worktrees/nav`)] });
+  const roles = roleOf(tree);
+  assert.deepEqual(Object.fromEntries([...roles].map(([k, v]) => [k, v.tip])), {
+    t1: "Workspace Boss", t2: "Helper", t3: "Org lead", t4: "Helper", t5: "Project lead on main", t6: "Helper",
+    t7: "Worker in nav", t8: "Helper", "sleep:s1": "Helper",
+  });
 });

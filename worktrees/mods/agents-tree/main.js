@@ -7,7 +7,7 @@ import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, hc, readTextFile, checking } from "herdr";
 import * as fs from "fs/promises";
-import { helperLabels, placeOf, orchOf, orgRootOf, isJob, buildTree, headBranch, hasGithub, projectSummary, parsePs, processTree, plumbingNote, procTotal, formatMem, bgState, bgLabel, bgVisible, sleepersOf, sleepTip, sleepEtas, sleepsIn, asleepIn, jobInfo } from "./model.js";
+import { helperLabels, helperBadge, projectLook, roleMark, roleOf, placeOf, orchOf, orgRootOf, isJob, buildTree, headBranch, hasGithub, projectSummary, parsePs, processTree, plumbingNote, procTotal, formatMem, bgState, bgLabel, bgVisible, sleepersOf, sleepTip, sleepEtas, sleepsIn, asleepIn, jobInfo } from "./model.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -38,16 +38,20 @@ function orgColor(org) {
   return sp ? MARK[(shared("space.colors") ?? {})[sp.id]] ?? null : null;
 }
 
-// The seat's tag, quiet: "workspace boss" (amber, layers) for the top one; for a supervisor
-// just "orchestrator" in its org's space color (the section already says workspace).
-// Fainter when it is off.
-function orchTag(t, off, org) {
-  const boss = org === "workspace";
-  const color = boss ? (t.warning ?? t.blocked) : orgColor(org) ?? t.accent;
-  return h_flex().id(`orch-tag-${org}-${off}`).flex_none().gap(3).px(5).h(16).rounded(4).items_center().text_size(10.5)
-    .bg(color + (off ? "10" : "1f")).text_color(off ? color + "99" : color)
-    .when(boss, (el) => el.child(svg("mods/workspace-chrome/layers.svg").size(10).flex_none()))
-    .child(boss ? "workspace boss" : "orchestrator");
+// A role's quiet mark: the collie glyph (Collie is the app), no box, tinted per role: the Boss
+// amber, an org lead its org's color, a project lead the accent, a worker muted, a helper dim.
+// The tooltip names the role in one line. Fainter when the seat is off.
+function roleIcon(t, id, mark, org, off = false) {
+  if (!mark) return null;
+  const color = { boss: t.warning ?? t.blocked, org: orgColor(org) ?? t.accent, project: t.accent, worker: t.muted, helper: t.dim }[mark.role] ?? t.dim;
+  return svg("mods/agents-tree/collie.svg").id(id).size(12).flex_none().text_color(off ? color + "99" : color).tooltip(mark.tip);
+}
+
+// Where an agent runs, quiet: a branch glyph and the checkout's short name, dim, no box.
+function placeChip(t, id, place) {
+  return h_flex().id(id).flex_none().gap(3).items_center().text_size(10.5).text_color(t.dim)
+    .tooltip(place === "main" ? "Runs in the main checkout" : `Runs in worktree ${place}`)
+    .child(svg("mods/workspace-chrome/git-branch.svg").size(10).flex_none()).child(place);
 }
 
 // To the rail (on macOS wide enough for the traffic lights), or back to the width it had.
@@ -114,6 +118,7 @@ export default class Agents extends View {
   init(_props, cx) {
     if (props()?.sortMenu) return;
     this.folded = new Set();
+    this.helpersOpen = new Set(); // owners whose helpers are unfolded as rows
     // Finished terminals dismissed with their ×: hidden at once, and removed with `hc rm`.
     this.dismissed = new Set();
     // Each agent's last state and when it changed (ms), kept across restarts.
@@ -408,24 +413,41 @@ export default class Agents extends View {
       .when(l === "└" || l === "├", el => el.border_b(1.5).rounded_bl(6)));
   }
 
-  // A quiet sleep tag: "zzz 2" on an org, "zzz 4m" on an idle agent.
+  // A quiet sleep tag, text only: "zzz 2" on an org, "zzz 4m" on an idle agent.
   sleepTag(t, id, text, tip) {
-    return div().id(id).flex_none().px(5).h(16).rounded(4).flex().items_center().text_size(10.5)
-      .bg(t.accent + "1a").text_color(t.accent).tooltip(tip).child(text);
+    return div().id(id).flex_none().text_size(10.5).text_color(t.dim).tooltip(tip).child(text);
   }
 
-  // A sleeping agent: the Claude icon dimmed with a zzz floating over it, its task in grey and
-  // how long it has slept. Hover: its recap, and a Wake button (ws agent wake), which resumes
-  // the same conversation in its tab.
-  sleepRow(t, s, now) {
-    const key = `sleep-${s.name}`;
-    const ago = s.since > 1e12 ? duration(now - s.since) : "";
-    const waking = this.waking === s.name;
-    const icon = div().relative().w(16).h(16).flex_none()
+  // A row owner's helper count: the other agents and sleepers in its folder, never rows of their
+  // own until a click unfolds them under it (again folds). The hover lists names and states; a
+  // helper that needs you (blocked, done) colors it like a fold count.
+  helperChip(t, owner, helpers, labelOf) {
+    const b = helperBadge(helpers, labelOf);
+    if (!b) return null;
+    const open = this.helpersOpen.has(owner);
+    return div().id(`helpers-${owner}`).flex_none().h(18).px(3).rounded(4).flex().items_center().text_size(11)
+      .text_color(b.need ? t[b.need] ?? t.dim : open ? t.foreground : t.dim).cursor_pointer()
+      .hover((el) => el.bg(t.hover).text_color(t.foreground))
+      .tooltip(`${b.tip}\nClick to ${open ? "fold" : "show"} them`)
+      .on_click((_e, cx) => {
+        cx.stop_propagation();
+        open ? this.helpersOpen.delete(owner) : this.helpersOpen.add(owner);
+        cx.notify();
+      })
+      .child(b.text);
+  }
+
+  // A sleeper's icon: the Claude icon dimmed with a zzz floating over it.
+  sleepIcon(t) {
+    return div().relative().w(16).h(16).flex_none()
       .child(image("icons/claude.svg").w(14).h(14).mt(2).opacity(0.4))
       .child(div().absolute().left(9).top(-6).text_size(9).font_semibold().text_color(t.accent)
         .frames(["z", "zz", "zzz", "zzz"], 650).loop("opacity", { from: 0.35, to: 1, period: 2600 }));
-    const wake = div().id(`wake-${s.name}`).flex_none().px(7).h(20).rounded(5).flex().items_center()
+  }
+
+  // The Wake button of a sleeper (`ws agent wake <name>`).
+  wakeButton(t, s) {
+    return div().id(`wake-${s.name}`).flex_none().px(7).h(20).rounded(5).flex().items_center()
       .text_size(11).bg(t.accent + "24").text_color(t.accent).cursor_pointer()
       .hover((el) => el.bg(t.accent + "40"))
       .on_click((_e, cx) => {
@@ -441,6 +463,16 @@ export default class Agents extends View {
         });
       })
       .child("Wake");
+  }
+
+  // A sleeping agent: the Claude icon dimmed with a zzz floating over it, its task in grey and
+  // how long it has slept. Hover: its recap, and a Wake button (ws agent wake), which resumes
+  // the same conversation in its tab.
+  // opts: `name` (a seat's sleeping owner reads as its seat), `mark` its role icon, `badge` its helper count.
+  sleepRow(t, s, now, { name = null, mark = null, badge = null } = {}) {
+    const key = `sleep-${s.name}`;
+    const ago = s.since > 1e12 ? duration(now - s.since) : "";
+    const waking = this.waking === s.name;
     return h_flex().id(key).px(8).h(30).flex_none().rounded(8).items_center().gap(7)
       .hover((el) => el.bg(t.hover))
       .on_hover((on, cx) => {
@@ -449,10 +481,13 @@ export default class Agents extends View {
         cx.notify();
       })
       .tooltip(sleepTip(s, ago))
-      .child(icon)
-      .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(s.title))
+      .child(this.sleepIcon(t))
+      .child(h_flex().flex_1().min_w(0).gap(5).items_center()
+        .child(div().min_w(0).truncate().text_color(t.dim).child(name ?? s.title))
+        .when(Boolean(mark), (el) => el.child(mark)))
+      .when(Boolean(badge), (el) => el.child(badge))
       .when(waking, (el) => el.child(div().flex_none().text_size(11).text_color(t.accent).frames(["waking", "waking.", "waking..", "waking..."], 300)))
-      .when(!waking && this.hovered === key, (el) => el.child(wake))
+      .when(!waking && this.hovered === key, (el) => el.child(this.wakeButton(t, s)))
       .when(!waking && this.hovered !== key && Boolean(ago), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(ago)));
   }
 
@@ -579,38 +614,56 @@ export default class Agents extends View {
       .when(!open, (el) => el.child(String(count)));
   }
 
-  // A project row: its name, the quiet summary (⚠ branch, ↓N, ⑂ N, GitHub) and its fold.
-  // The row IS the project's lead on main (its orchestrator orch-<org>-<project>, else the
-  // agent in the main checkout): its program icon, state, processes and sleep countdown show,
-  // and a click focuses it. With no agent on main it reads like an off seat: a muted folder and
-  // name, no state, and a click opens the space its first worker is in.
-  projectRow(t, p, leadTask, now) {
+  // A project row: the project's lead on main IS the row, and looks the same live or asleep
+  // (projectLook): its icon, the project name, a quiet `main` chip, the project-lead mark, the
+  // summary (⚠ branch, ↓N, ⑂ N, GitHub), its helper count and fold. Asleep only dims it and adds
+  // the zzz (recap on hover, Wake on hover); live adds its processes, sleep countdown and state,
+  // and a click focuses it. With nothing on main, live or asleep: a muted folder and name, no
+  // state, and a click opens the space its first worker is in.
+  projectRow(t, p, { leadTask, now, mark, badge }) {
+    const look = projectLook(p);
     const facts = projectSummary(this.facts.get(p.base));
     const key = `proj-${p.org}-${p.name}`;
     const lead = p.lead;
+    const live = lead && !lead.sleeping ? lead : null;
     const kids = p.workers;
-    const count = kids.length + p.background.length + p.jobs.length;
+    const count = kids.length + p.background.filter((x) => x !== lead).length + p.jobs.length;
     const top = kids.reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
-    const space = (lead ?? kids[0])?.space;
-    const pic = lead ? icon(lead.program, 16, t.foreground) : null;
-    const eta = !lead || lead.status === "working" || lead.status === "blocked" ? null : sleepsIn(this.etas?.get(lead.address), now);
-    const procs = lead ? this.procChip(t, lead) : null;
-    const idle = lead?.status === "idle" && !lead.focused;
+    const space = (live ?? kids[0])?.space;
+    const pic = look.folder ? svg("mods/workspace-chrome/folder.svg").size(13).flex_none().text_color(t.dim)
+      : look.asleep ? this.sleepIcon(t) : icon(lead.program, 16, t.foreground);
+    const eta = !live || live.status === "working" || live.status === "blocked" ? null : sleepsIn(this.etas?.get(live.address), now);
+    const procs = live ? this.procChip(t, live) : null;
+    const idle = live?.status === "idle" && !live.focused;
+    const hover = this.hovered === key;
+    const ago = look.asleep && lead.since > 1e12 ? duration(now - lead.since) : "";
+    const waking = look.asleep && this.waking === lead.name;
     return h_flex().id(key).px(8).h(30).flex_none().rounded(8).items_center().gap(7).cursor_pointer()
       .hover((s) => s.bg(t.hover))
-      .when(Boolean(lead?.focused), (el) => el.bg(t.selected))
-      .tooltip(lead ? `${p.name} on main${leadTask ? `: ${leadTask}` : ""}. Its worktrees hang under it` : `${p.name}: no agent on main`)
-      .on_click(() => (lead ? run("pane.focus", { pane: lead.pane }) : space && run("space.select", { id: space })))
-      .child(pic ?? svg("mods/workspace-chrome/folder.svg").size(13).flex_none().text_color(t.dim))
-      .child(div().min_w(0).flex_shrink(1).truncate().text_color(!lead ? t.dim : idle ? t.muted : t.foreground).child(p.name))
+      .on_hover((on, cx) => {
+        if (on) this.hovered = key;
+        else if (this.hovered === key) this.hovered = null;
+        cx.notify();
+      })
+      .when(Boolean(live?.focused), (el) => el.bg(t.selected))
+      .tooltip(look.asleep ? sleepTip(lead, ago) : live ? `${p.name} on main${leadTask ? `: ${leadTask}` : ""}. Its worktrees hang under it` : `${p.name}: nothing on main`)
+      .on_click(() => (live ? run("pane.focus", { pane: live.pane }) : !lead && space && run("space.select", { id: space })))
+      .child(pic)
+      .child(div().min_w(0).flex_shrink(1).truncate().text_color(look.dim ? t.dim : idle ? t.muted : t.foreground).child(look.name))
+      .when(Boolean(look.tag), (el) => el.child(placeChip(t, `${key}-main`, look.tag)))
+      .when(Boolean(mark), (el) => el.child(mark))
       .child(h_flex().flex_1().min_w(0).gap(6).items_center().text_size(11).overflow_hidden()
         .children(facts.map((f) => (f.kind === "github"
           ? svg("mods/agents-tree/github.svg").id(`${key}-gh`).size(11).flex_none().text_color(t.dim).tooltip(f.tip)
           : div().id(`${key}-${f.kind}`).flex_none().text_color(f.warn ? t.ansi1 : t.dim).tooltip(f.tip).child(f.text)))))
       .when(Boolean(procs), (el) => el.child(procs))
-      .when(Boolean(eta), (el) => el.child(this.sleepTag(t, `eta-${lead.address}`, eta, "Auto-sleep puts it to sleep then: its summary goes to Engram and its terminal ends")))
+      .when(Boolean(badge), (el) => el.child(badge))
+      .when(Boolean(eta), (el) => el.child(this.sleepTag(t, `eta-${live?.address}`, eta, "Auto-sleep puts it to sleep then: its summary goes to Engram and its terminal ends")))
       .when(count > 0, (el) => el.child(this.nodeFold(t, key, count, top)))
-      .when(Boolean(lead), (el) => el.child(this.status(t, lead, true)));
+      .when(Boolean(live), (el) => el.child(this.status(t, live, true)))
+      .when(waking, (el) => el.child(div().flex_none().text_size(11).text_color(t.accent).frames(["waking", "waking.", "waking..", "waking..."], 300)))
+      .when(look.asleep && !waking && hover, (el) => el.child(this.wakeButton(t, lead)))
+      .when(look.asleep && !waking && !hover && Boolean(ago), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(ago)));
   }
 
   // An agent's live processes, unfolded: name, CPU and memory, on tree lines.
@@ -692,8 +745,13 @@ export default class Agents extends View {
     // Projects whose summary the timer reads, with the space to open.
     this.bases = new Map(tree.seats.flatMap((s) => s.projects.map((p) => [p.base, p])));
     // The order agent.next walks: the tree's, top to bottom.
-    const order = [...tree.pinned, ...(tree.boss ? [tree.boss] : []), ...tree.root.filter((a) => this.listed.has(a.address)), ...tree.seats.flatMap((s) => [
-      ...(s.orch ? [s.orch] : []), ...s.projects.flatMap((p) => [...(p.lead ? [p.lead] : []), ...p.workers]), ...s.loose])];
+    const order = [...tree.pinned, tree.boss, ...tree.helpers, ...tree.seats.flatMap((s) => [
+      s.orch, ...s.helpers, ...s.projects.flatMap((p) => [p.lead, ...p.workers]), ...s.loose])].filter((a) => a && this.listed.has(a.address));
+    // Every placed agent's role mark, and each owner's helpers (shown as a count on its row).
+    const roles = roleOf(tree);
+    const badges = new Map([[tree.boss?.address, tree.helpers], ...tree.seats.flatMap((s) => [[s.orch?.address, s.helpers],
+      ...s.projects.flatMap((p) => [[p.lead?.address, p.helpers], ...p.checkouts.map((c) => [c.lead?.address, c.helpers])])])]);
+    const markOf = (a) => roleIcon(t, `role-${a.address}`, roles.get(a.address), orchOf(a.name) ?? null);
     setAgentOrder(order.map((a) => a.address));
     if (collapsed) list = order;
 
@@ -744,8 +802,10 @@ export default class Agents extends View {
       return [a.address, tab ? title(many ? { ...tab, named: false } : tab, many ? a : leads.get(a.tab)) : (a.title || a.program?.name || "")];
     }));
     // The Boss's helpers never read as a second Boss.
-    if (tree.boss) for (const [k, v] of helperLabels(tree.root.map((a) => a.address), labels.get(tree.boss.address), (k) => labels.get(k))) labels.set(k, v);
+    if (tree.boss) for (const [k, v] of helperLabels(tree.helpers.filter((a) => !a.sleeping).map((a) => a.address), labels.get(tree.boss.address) ?? tree.boss.title, (k) => labels.get(k))) labels.set(k, v);
     const label = (a) => labels.get(a.address);
+    const helperName = (h) => (h.sleeping ? h.title : label(h));
+    const badgeOf = (a) => this.helperChip(t, a.address, badges.get(a.address) ?? [], helperName);
     const detail = new Map(list.map(a => [a.address, /^\d+$/.test(label(a)) ? null : label(a)]));
     const seen = {};
     for (const a of list) { const k = `${a.space_name}\u0000${detail.get(a.address) ?? ""}`; seen[k] = (seen[k] ?? 0) + 1; }
@@ -801,6 +861,8 @@ export default class Agents extends View {
       const full = isPinned && !orch;
       const name = orch ? ORG_LABEL[orch] : full ? a.space_name || label(a) : more ?? (/^\d+$/.test(label(a)) ? a.program?.name || label(a) : label(a));
       const procs = this.procChip(t, a);
+      const mark = isPinned ? null : markOf(a);
+      const helpers = badgeOf(a);
       return h_flex()
         .id(`ag-${a.address}`)
         .px(8)
@@ -826,18 +888,15 @@ export default class Agents extends View {
           })).child(pic)))
         .child(h_flex().flex_1().min_w(0).gap(5).items_center()
           .child(div().min_w(0).max_w(full && more ? 120 : 200).truncate().text_color(idle ? t.muted : t.foreground).child(name))
-          .when(Boolean(orch), el => el.child(orchTag(t, false, orch).tooltip(orch === "workspace" ? "The Workspace Boss: talks with you, classifies and routes to the org supervisors (ws orchestrator start workspace)" : `mac-workspace's ${orch} supervisor: one long-lived Claude at ~/mac-workspace/${orch} (ws orchestrator start ${orch})`)))
-          .when(Boolean(where), el => el.child(h_flex().flex_none().gap(3).px(5).h(16).rounded(4).items_center().text_size(10.5)
-            .bg((where === "main" ? t.accent : t.dim) + "1f").text_color(where === "main" ? t.accent : t.muted)
-            .tooltip(where === "main" ? "Runs in the main checkout" : `Runs in worktree ${where}`)
-            .child(svg("mods/workspace-chrome/git-branch.svg").size(10).flex_none()).child(where)))
-          .when(Boolean(root), el => el.child(h_flex().flex_none().gap(3).px(5).h(16).rounded(4).items_center().text_size(10.5)
-            .bg((t.warning ?? t.blocked) + "1f").text_color(t.warning ?? t.blocked)
-            .tooltip(root === "workspace" ? "A helper of the Workspace Boss: another Claude at the workspace root (~/mac-workspace)" : `Runs at the ${root} root (~/mac-workspace/${root})`)
-            .child(svg("mods/workspace-chrome/folder.svg").size(10).flex_none()).child(root === "workspace" ? "helper" : `${root} root`)))
+          .when(Boolean(where), el => el.child(placeChip(t, `where-${a.address}`, where)))
+          .when(Boolean(mark), el => el.child(mark))
+          .when(!mark && Boolean(root), el => el.child(h_flex().id(`root-${a.address}`).flex_none().gap(3).items_center().text_size(10.5).text_color(t.dim)
+            .tooltip(`Runs at the ${root} root (~/mac-workspace/${root})`)
+            .child(svg("mods/workspace-chrome/folder.svg").size(10).flex_none()).child(`${root} root`)))
           .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`· ${more}`))))
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
         .when(Boolean(procs), el => el.child(procs))
+        .when(Boolean(helpers), el => el.child(helpers))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
         .when(this.hovered === a.address, el => el.child(pin))
         .when(Boolean(eta), el => el.child(this.sleepTag(t, `eta-${a.address}`, eta, "Auto-sleep puts it to sleep then: its summary goes to Engram and its terminal ends")))
@@ -858,13 +917,23 @@ export default class Agents extends View {
       .child(div().size(16).flex_none())
       .child(h_flex().flex_1().min_w(0).gap(5).items_center()
         .child(div().truncate().text_color(t.dim).child(ORG_LABEL[o]))
-        .when(o !== "other", (el) => el.child(orchTag(t, true, o))))
+        .when(o !== "other", (el) => el.child(roleIcon(t, `role-off-${o}`, roleMark(o === "workspace" ? "boss" : "org"), o, true))))
       .child(div().flex_none().text_size(11).text_color(t.dim).child(o === "other" ? "outside the orgs" : "off"));
+
+    // A row's owner (the Boss, an org lead, a worktree's worker), live or asleep, with its helpers
+    // unfolded under it when its helper count was clicked; folded they are only that count.
+    const helperEls = (owner, helpers) => (owner && helpers?.length && this.helpersOpen.has(owner.address)
+      ? this.branches(t, `help-${owner.address}`, helpers.map((h) => (h.sleeping ? [this.sleepRow(t, h, now, { mark: markOf(h) })] : withKids(h, 0, null, true))), 10)
+      : []);
+    const ownerEls = (a, i, skip = null, grouped = false, name = null) => [
+      ...(a.sleeping ? [this.sleepRow(t, a, now, { name, mark: markOf(a), badge: badgeOf(a) })] : withKids(a, i, skip, grouped)),
+      ...helperEls(a, badges.get(a.address)),
+    ];
 
     // An org's seat: its orchestrator (or the off row), then its projects and their workers.
     const seatEls = (s, i) => {
       const key = `seat-${s.org}`;
-      const head = s.orch ? withKids(s.orch, i, listedAgents) : [offRow(s.org)];
+      const head = s.orch ? ownerEls(s.orch, i, listedAgents, false, ORG_LABEL[s.org]) : [offRow(s.org)];
       const count = s.projects.length + s.loose.length + s.jobs.length;
       const top = [...s.projects.flatMap((p) => [...(p.lead ? [p.lead] : []), ...p.workers]), ...s.loose].reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
       if (!count) return head;
@@ -874,22 +943,24 @@ export default class Agents extends View {
         .when(zzz > 0, (el) => el.child(this.sleepTag(t, `${key}-zzz`, `zzz ${zzz}`, `${zzz} agent${zzz === 1 ? "" : "s"} asleep in ${ORG_LABEL[s.org] ?? s.org}`)))
         .child(this.nodeFold(t, key, count, top));
       if (this.folded.has(key)) return [headRow, ...rest];
-      // A project's worktrees: one header per worktree, its agents and background terminals under it.
+      // A project's worktrees: one header per worktree, under it its worker (live agents first,
+      // else its most recent sleeper) carrying the rest as helpers, and its background terminals.
       const checkoutEls = (pk, c) => {
         const ck = `${pk}-co-${c.place}`;
         const top = c.workers.reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
-        const head = this.checkoutRow(t, ck, c.place, c.workers.length + c.background.length, top);
+        const head = this.checkoutRow(t, ck, c.place, (c.lead ? 1 : 0) + c.helpers.length + c.background.length, top);
         return this.folded.has(ck) ? [head] : [head, ...this.branches(t, `${ck}-w`,
-          [...c.workers.map((a) => withKids(a, 0, null, true)), ...c.background.map(extraEls)], 10)];
+          [...(c.lead ? [ownerEls(c.lead, 0, null, true)] : []), ...c.background.map(extraEls)], 10)];
       };
       const projectEls = (p) => {
         const pk = `proj-${p.org}-${p.name}`;
-        const pr = this.projectRow(t, p, p.lead ? detail.get(p.lead.address) : null, now);
+        const pr = this.projectRow(t, p, { leadTask: p.lead ? detail.get(p.lead.address) : null, now,
+          mark: p.lead ? markOf(p.lead) : null, badge: p.lead ? badgeOf(p.lead) : null });
         if (this.folded.has(pk)) return [pr];
-        // The lead's own sub-agents and processes (its row is the project row), then the rest
-        // of the main checkout with no header, then each worktree.
-        const leadKids = p.lead ? withKids(p.lead, 0, null, true).slice(1) : [];
-        return [pr, ...leadKids, ...this.branches(t, `${pk}-w`, [...p.main.workers.map((a) => withKids(a, 0, null, true)),
+        // The lead's own sub-agents and processes (its row is the project row) and its helpers when
+        // unfolded, then the main checkout's terminals with no header, then each worktree.
+        const leadKids = p.lead && !p.lead.sleeping ? withKids(p.lead, 0, null, true).slice(1) : [];
+        return [pr, ...leadKids, ...helperEls(p.lead, p.helpers), ...this.branches(t, `${pk}-w`, [
           ...p.main.background.map(extraEls), ...p.checkouts.map((c) => checkoutEls(pk, c)), jobsGroup(`${pk}-jobs`, p.jobs)], 10)];
       };
       return [headRow, ...rest, ...this.branches(t, `${key}-p`, [jobsGroup(`${key}-jobs`, s.jobs), ...s.projects.map(projectEls),
@@ -900,11 +971,11 @@ export default class Agents extends View {
       ...(tree.pinned.length ? [div().id("pinned").px(8).pt(8).h(30).flex_none().flex().items_center().text_size(11).font_medium().text_color(t.dim).child("Pinned"),
         ...tree.pinned.flatMap((a) => withKids(a, 0))] : []),
       // The Workspace Boss gives the orders: the org orchestrators hang under it, with tree lines.
-      ...(tree.boss ? withKids(tree.boss, 0, listedAgents) : [offRow("workspace")]),
-      ...this.branches(t, "seat-branch", [jobsGroup("boss-jobs", tree.jobs), ...tree.seats.map(seatEls)]),
-      // The Boss's helpers (other Claudes at the workspace root, often panes of its tab) are its
-      // peers, not its reports: they sit at the Boss's level, after its tree, so the org lines stay whole.
-      ...tree.root.flatMap((a) => (this.listed.has(a.address) ? withKids(a, 0) : extraEls(a))),
+      // Its helpers (other Claudes at the workspace root) are a count on its row; with no Boss
+      // running they keep rows of their own. Terminals at the root hang under it with its jobs.
+      ...(tree.boss ? ownerEls(tree.boss, 0, listedAgents, false, ORG_LABEL.workspace) : [offRow("workspace")]),
+      ...this.branches(t, "seat-branch", [jobsGroup("boss-jobs", tree.jobs), ...tree.root.map(extraEls),
+        ...(tree.boss ? [] : tree.helpers.map((h) => (h.sleeping ? [this.sleepRow(t, h, now)] : withKids(h, 0)))), ...tree.seats.map(seatEls)]),
     ];
 
     return v_flex()
