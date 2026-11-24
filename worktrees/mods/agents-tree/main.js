@@ -682,7 +682,7 @@ export default class Agents extends View {
     // Projects whose summary the timer reads, with the space to open.
     this.bases = new Map(tree.seats.flatMap((s) => s.projects.map((p) => [p.base, p])));
     // The order agent.next walks: the tree's, top to bottom.
-    const order = [...tree.pinned, ...(tree.boss ? [tree.boss] : []), ...tree.seats.flatMap((s) => [
+    const order = [...tree.pinned, ...(tree.boss ? [tree.boss] : []), ...tree.root.filter((a) => this.listed.has(a.address)), ...tree.seats.flatMap((s) => [
       ...(s.orch ? [s.orch] : []), ...s.projects.flatMap((p) => [...(p.orch ? [p.orch] : []), ...p.workers]), ...s.loose])];
     setAgentOrder(order.map((a) => a.address));
     if (collapsed) list = order;
@@ -887,7 +887,9 @@ export default class Agents extends View {
         ...tree.pinned.flatMap((a) => withKids(a, 0))] : []),
       // The Workspace Boss gives the orders: the org orchestrators hang under it, with tree lines.
       ...(tree.boss ? withKids(tree.boss, 0, listedAgents) : [offRow("workspace")]),
-      ...this.branches(t, "seat-branch", [jobsGroup("boss-jobs", tree.jobs), ...tree.seats.map(seatEls)]),
+      ...this.branches(t, "seat-branch", [jobsGroup("boss-jobs", tree.jobs),
+        // Agents at the workspace root are the Boss's own helpers, above the org seats.
+        ...tree.root.map((a) => (this.listed.has(a.address) ? withKids(a, 0) : extraEls(a))), ...tree.seats.map(seatEls)]),
     ];
 
     return v_flex()

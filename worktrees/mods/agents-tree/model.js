@@ -52,7 +52,8 @@ export const ORG_SEATS = ["cs", "ag", "personal", "other"];
 const byUrgency = (x, y) => y.rank - x.rank || y.since - x.since || y.seq - x.seq;
 
 // The tree. `list`: agents in the list's order, each { address, name, cwd, rank, since, seq,
-// pinned, space }. Returns { boss, pinned, seats: [{ org, orch, projects, loose }] }: each
+// pinned, space }. Returns { boss, pinned, jobs, root, seats: [{ org, orch, projects, loose }] }:
+// `root` the agents and background terminals at the workspace root (the Boss's own); each
 // project { org, name, base, orch, workers, checkouts, rank, since }, `checkouts` its workers
 // and background terminals by checkout ({ place, workers, background }: "main" first, then each
 // worktree as first met), `loose` the org's agents outside a
@@ -68,6 +69,7 @@ export function buildTree(list, { org = "all", byPriority = false, extras = [] }
   const boss = list.find((a) => orchOf(a.name) === "workspace") ?? null;
   const pinned = [];
   const jobs = [];
+  const root = []; // agents and background terminals at the workspace root: the Boss's own
   const seats = new Map(ORG_SEATS.map((o) => [o, { org: o, orch: null, projects: [], loose: [], jobs: [] }]));
   const projects = new Map();
   const projectNode = (p) => {
@@ -84,6 +86,7 @@ export function buildTree(list, { org = "all", byPriority = false, extras = [] }
     const seatOrg = orchOf(a.name);
     if (seatOrg) { seats.get(seatOrg).orch ??= a; continue; }
     if (a.pinned) { pinned.push(a); continue; }
+    if (orgRootOf(a.cwd) === "workspace") { root.push(a); continue; }
     const p = projectOf(a.cwd);
     const seat = seats.get(p?.org ?? orgOfDir(a.cwd));
     if (!p) { seat.loose.push(a); continue; }
@@ -95,6 +98,7 @@ export function buildTree(list, { org = "all", byPriority = false, extras = [] }
     node.since = Math.max(node.since, a.since);
     node.seq = Math.max(node.seq, a.seq);
   }
+  const rootTerms = [];
   for (const extra of extras) {
     const x = { rank: 0, since: 0, seq: 0, ...extra };
     const p = projectOf(x.cwd);
@@ -105,6 +109,7 @@ export function buildTree(list, { org = "all", byPriority = false, extras = [] }
       else if (root === "workspace") jobs.push(x);
       else seat.jobs.push(x);
     } else if (p) projectNode(p).background.push(x);
+    else if (root === "workspace") rootTerms.push(x);
     else seat.loose.push(x);
   }
   if (byPriority) {
@@ -116,7 +121,7 @@ export function buildTree(list, { org = "all", byPriority = false, extras = [] }
   }
   for (const seat of seats.values()) for (const p of seat.projects) p.checkouts = byCheckout(p.workers, p.background);
   const shown = (s) => (org === "all" ? s.org !== "other" || s.projects.length || s.loose.length || s.jobs.length : s.org === org);
-  return { boss, pinned, jobs, seats: [...seats.values()].filter(shown) };
+  return { boss, pinned, jobs, root: [...root, ...rootTerms], seats: [...seats.values()].filter(shown) };
 }
 
 // A project's workers and background terminals grouped by the checkout they run in: the main

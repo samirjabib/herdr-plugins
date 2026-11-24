@@ -339,3 +339,17 @@ test("asleepIn counts the sleepers of a project and of an org seat", () => {
   assert.equal(asleepIn({ projects: [p1, p2], loose: [sleeper] }), 3);
   assert.equal(asleepIn(null), 0);
 });
+
+test("an agent at the workspace root sits under the Boss, not in Other; Other keeps only folders outside the workspace", () => {
+  const tree = buildTree([
+    ag("t1", R, { name: "orch-workspace" }),
+    ag("t2", R, { name: "engram-cloud" }),
+    ag("t3", "/Users/x/Desktop"),
+  ], { extras: [{ address: "b1", name: null, cwd: R }] });
+  assert.deepEqual(tree.root.map((a) => a.address), ["t2", "b1"]);
+  const other = tree.seats.find((s) => s.org === "other");
+  assert.deepEqual(other.loose.map((a) => a.address), ["t3"]);
+  // With nothing outside the workspace, Other is hidden.
+  const quiet = buildTree([ag("t1", R, { name: "orch-workspace" }), ag("t2", R)]);
+  assert.equal(quiet.seats.some((s) => s.org === "other"), false);
+});
