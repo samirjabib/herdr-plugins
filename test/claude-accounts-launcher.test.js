@@ -72,6 +72,7 @@ test("outside Herdr, nothing changes, even with CLAUDE_ACCOUNTS_DIR set", async 
   const s = await sandbox(t, { active: "/profiles/a/home\n" });
   const r = run(s, { CLAUDE_CONFIG_DIR: "/mine", CLAUDE_ACCOUNTS_DIR: "/profiles/b/home" });
   assert.match(r.out, /^dir=\/mine$/m);
+  assert.match(r.out, /^accounts=\/profiles\/b\/home$/m);
 });
 
 test("arguments reach the real claude exactly, spaces and quotes included", async (t) => {

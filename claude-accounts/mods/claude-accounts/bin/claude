@@ -68,8 +68,8 @@ if [ -n "${HC_TERMINAL_ID:-}" ]; then
       unset CLAUDE_CONFIG_DIR
     fi
   fi
+  [ "$wrapper" = 1 ] || unset CLAUDE_ACCOUNTS_DIR
 fi
-[ "$wrapper" = 1 ] || unset CLAUDE_ACCOUNTS_DIR
 
 # Inside Herdr, in a mac-workspace checkout, the session gets a name that tells
 # sessions apart at a glance (prompt box, /resume, Remote Control on the phone):
