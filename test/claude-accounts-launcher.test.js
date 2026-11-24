@@ -246,3 +246,46 @@ test("CLAUDE_ACCOUNTS_HOME moves the state folder the launcher reads", async (t)
   await writeFile(join(moved, "active"), "/profiles/c/home\n");
   assert.match(run(s, { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_HOME: moved }).out, /^dir=\/profiles\/c\/home$/m);
 });
+
+// group-accounts pins a mac-workspace group to one account's config folder:
+// `<group><TAB><config dir>` lines in the state folder's group-accounts file.
+async function pinned(s, lines) {
+  await writeFile(join(s.home, ".config/herdr-app/claude-accounts/group-accounts"), lines);
+}
+
+test("a group pinned in group-accounts runs on its folder, over the active file and a switch's CLAUDE_ACCOUNTS_DIR", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/a/home\n" });
+  const cs = join(s.home, "profiles/cs");
+  await mkdir(cs, { recursive: true });
+  await pinned(s, `# group\tconfig dir\n\ncs\t${cs}\n`);
+  const cwd = await workspace(s, "cs/shop/worktrees/x/src");
+  assert.match(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, cwd).out, new RegExp(`^dir=${cs}$`, "m"));
+  const sw = run(s, { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_DIR: "/profiles/b/home" }, [], undefined, cwd);
+  assert.match(sw.out, new RegExp(`^dir=${cs}$`, "m"));
+  assert.match(sw.out, /^accounts=<unset>$/m);
+  // A wrapper next on the PATH gets the pinned folder as CLAUDE_ACCOUNTS_DIR.
+  const path = await wrapperBin(s);
+  const w = run(s, { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_DIR: "/profiles/b/home" }, [], path, cwd);
+  assert.match(w.out, new RegExp(`^accounts=${cs}$`, "m"));
+});
+
+test("an unpinned group, a pin to a missing folder, or a folder outside mac-workspace keep the usual pick", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/a/home\n" });
+  await pinned(s, `cs\t${join(s.home, "missing")}\n`);
+  for (const rel of ["cs/shop/main", "ag/shop-app/main"]) {
+    const cwd = await workspace(s, rel);
+    assert.match(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, cwd).out, /^dir=\/profiles\/a\/home$/m);
+  }
+  const outside = join(s.home, "elsewhere");
+  await mkdir(outside);
+  assert.match(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, outside).out, /^dir=\/profiles\/a\/home$/m);
+});
+
+test("outside Herdr a pinned group changes nothing", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/a/home\n" });
+  const cs = join(s.home, "profiles/cs");
+  await mkdir(cs, { recursive: true });
+  await pinned(s, `cs\t${cs}\n`);
+  const cwd = await workspace(s, "cs/shop/main");
+  assert.match(run(s, { CLAUDE_CONFIG_DIR: "/mine" }, [], undefined, cwd).out, /^dir=\/mine$/m);
+});
