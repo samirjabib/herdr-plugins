@@ -18,6 +18,12 @@ go to sleep and come back where they were.
   soft gold `★` when it is on main (where to update and make worktrees from),
   a red `⚠` when it is on another branch. The split buttons open the new
   terminal in that pane's folder, not the focused pane's.
+- **Sleeping agents in the tree** (`agents-tree`). mac-workspace puts idle agents
+  to sleep (summary in Engram, terminal ended); the tree reads them from Collie's
+  core (`/api/agents`, every 15 s) and keeps each under its checkout: the Claude
+  icon dimmed, its task in grey, how long it has slept and a small `zzz`. Hover:
+  its recap's first lines. Click: `ws agent wake <name>`, which resumes the same
+  conversation in its tab.
 - **The tab bar by level** (`tabs-level`, a copy of Herdr's `tabs`). It shows only
   the tabs on the active tab's level: the same checkout (`<project>/main` or one
   worktree) or, for an orchestrator, the same org root (`~/mac-workspace/<org>`).

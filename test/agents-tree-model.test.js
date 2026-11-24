@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   projectOf, projectOrchOf, buildTree, headBranch, hasGithub, projectSummary,
   parsePs, shortCmd, processRows, formatMem, processTree, plumbingNote, procTotal,
-  bgState, bgLabel, bgVisible, jobInfo, placeOf, orgRootOf,
+  bgState, bgLabel, bgVisible, jobInfo, placeOf, orgRootOf, sleepersOf, sleepTip,
 } from "../worktrees/mods/agents-tree/model.js";
 
 const R = "/Users/me/mac-workspace";
@@ -288,4 +288,26 @@ test("a project with agents only in main has one main group; byPriority orders i
   const tree = buildTree([ag("t1", `${R}/cs/site/main`, { rank: 1 }), ag("t2", `${R}/cs/site/main`, { rank: 4 })], { byPriority: true });
   const site = tree.seats.find((s) => s.org === "cs").projects[0];
   assert.deepEqual(site.checkouts.map((c) => [c.place, c.workers.map((w) => w.address)]), [["main", ["t2", "t1"]]]);
+});
+
+test("sleepersOf keeps the core's sleeping agents as tree extras under their checkout", () => {
+  const got = sleepersOf([
+    { name: "hcp", title: "HCP reviews", cwd: `${R}/cs/site/worktrees/hcp`, sleeping: true, sinceMs: 5, recap: "Goal: x" },
+    { name: "awake", cwd: `${R}/cs/site/main`, state: "idle" },
+    { name: "bad name", cwd: `${R}/cs/site/main`, sleeping: true },
+    { name: "lids", cwd: `${R}/ag/lids/main`, state: "sleeping" },
+  ]);
+  assert.deepEqual(got.map((s) => s.address), ["sleep:hcp", "sleep:lids"]);
+  assert.deepEqual(got[0], { address: "sleep:hcp", name: "hcp", title: "HCP reviews", cwd: `${R}/cs/site/worktrees/hcp`, sleeping: true, since: 5, recap: "Goal: x" });
+  assert.equal(got[1].title, "lids");
+  assert.deepEqual(sleepersOf(null), []);
+  const tree = buildTree([], { extras: got });
+  const site = tree.seats.find((s) => s.org === "cs").projects[0];
+  assert.deepEqual(site.checkouts.map((c) => [c.place, c.background.map((b) => b.name)]), [["hcp", ["hcp"]]]);
+});
+
+test("sleepTip says how long, the recap's first lines, and that a click wakes it", () => {
+  const tip = sleepTip({ recap: "RECAP-BEGIN ab\nGoal: ship\nDone: a\nNext: b\nOpen questions: none\nmore\nRECAP-END ab" }, "1h");
+  assert.equal(tip, "Asleep 1h · summary saved in Engram\nGoal: ship\nDone: a\nNext: b\nOpen questions: none\nClick to wake it (same conversation, same tab)");
+  assert.equal(sleepTip({ recap: null }, ""), "Asleep · summary saved in Engram\nClick to wake it (same conversation, same tab)");
 });

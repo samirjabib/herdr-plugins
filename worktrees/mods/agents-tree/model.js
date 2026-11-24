@@ -343,3 +343,19 @@ export function formatMem(kb) {
   const mb = kb / 1024;
   return mb >= 1024 ? `${(mb / 1024).toFixed(1)} GB` : `${Math.round(mb)} MB`;
 }
+
+// Sleeping agents (mac-workspace puts idle agents to sleep: summary in Engram, terminal ended),
+// from the core's /api/agents: each as a tree extra { address: "sleep:<name>", name, title,
+// cwd, sleeping, since, recap } so it hangs under its checkout like a background terminal.
+export function sleepersOf(list) {
+  return (Array.isArray(list) ? list : [])
+    .filter((a) => a && (a.sleeping || a.state === "sleeping") && /^[\w.-]+$/.test(a.name ?? ""))
+    .map((a) => ({ address: `sleep:${a.name}`, name: a.name, title: a.title || a.name, cwd: a.cwd ?? null,
+      sleeping: true, since: a.sinceMs ?? 0, recap: a.recap ?? null }));
+}
+
+// A sleeper's tooltip: how long it has slept, its recap's first lines, and what a click does.
+export function sleepTip(s, ago) {
+  const recap = (s.recap ?? "").split("\n").map((l) => l.trim()).filter((l) => l && !/^RECAP-/.test(l)).slice(0, 4);
+  return [`Asleep${ago ? ` ${ago}` : ""} · summary saved in Engram`, ...recap, "Click to wake it (same conversation, same tab)"].join("\n");
+}

@@ -7,7 +7,7 @@ import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, hc, readTextFile, checking } from "herdr";
 import * as fs from "fs/promises";
-import { placeOf, orchOf, orgRootOf, isJob, buildTree, headBranch, hasGithub, projectSummary, parsePs, processTree, plumbingNote, procTotal, formatMem, bgState, bgLabel, bgVisible, jobInfo } from "./model.js";
+import { placeOf, orchOf, orgRootOf, isJob, buildTree, headBranch, hasGithub, projectSummary, parsePs, processTree, plumbingNote, procTotal, formatMem, bgState, bgLabel, bgVisible, sleepersOf, sleepTip, jobInfo } from "./model.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -137,6 +137,20 @@ export default class Agents extends View {
       } catch {} // core down: keep the last colors
     };
     cx.spawn(colors);
+    // Sleeping agents (their terminals ended), from the same core: shown under their checkout
+    // with a zzz, so the tree still says who works where.
+    this.sleepers = [];
+    const sleepers = async (cx) => {
+      try {
+        const r = await fetch(`${CORE}/api/agents`);
+        if (!r.ok) return;
+        const got = await r.json();
+        const next = sleepersOf(Array.isArray(got) ? got : got?.agents);
+        if (JSON.stringify(next) !== JSON.stringify(this.sleepers)) { this.sleepers = next; cx.notify(); }
+      } catch {} // core down: keep the last list
+    };
+    cx.spawn(sleepers);
+    cx.timer.every(15000, (cx) => cx.spawn(sleepers));
     // Colors change rarely: once a minute is enough, and the core only reads one small file.
     cx.timer.every(60000, (cx) => cx.spawn(colors));
     // Live processes under each agent (S4) and each project's summary: read only in a live
@@ -391,6 +405,27 @@ export default class Agents extends View {
       .when(l === "└" || l === "├", el => el.border_b(1.5).rounded_bl(6)));
   }
 
+  // A sleeping agent: its task, dimmed, and a small zzz with how long it has slept. Hover: its
+  // recap. Click: wake it (ws agent wake), which resumes the same conversation in its tab.
+  sleepRow(t, s, now) {
+    const key = `sleep-${s.name}`;
+    const ago = s.since ? duration(now - s.since) : "";
+    return h_flex().id(key).px(8).h(30).flex_none().rounded(8).items_center().gap(7).cursor_pointer()
+      .hover((el) => el.bg(t.hover))
+      .tooltip(sleepTip(s, ago))
+      .on_click((_e, cx) => {
+        if (this.waking === s.name) return;
+        this.waking = s.name;
+        cx.notify();
+        exec("/bin/zsh", ["-c", '"$HOME/mac-workspace/bin/ws" agent wake "$1"', "wake", s.name]).catch(() => null)
+          .finally(() => { this.waking = null; });
+      })
+      .child(image("icons/claude.svg").w(14).h(14).flex_none().opacity(0.45))
+      .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(s.title))
+      .child(div().flex_none().text_size(11).text_color(t.dim).child(this.waking === s.name ? "waking…" : ago))
+      .child(div().flex_none().w(22).text_right().text_size(11).text_color(t.muted).child("zzz"));
+  }
+
   // A background terminal (no agent status: a dev server, a test run an agent started with
   // `hc run --bg`): name or short command · live|done|failed|closed · CPU · memory. Click: focus
   // its pane, else peek at it. A finished one shows a × on hover that dismisses it.
@@ -604,11 +639,12 @@ export default class Agents extends View {
     const live = new Set(all.map((x) => x.address));
     const terms = [...all, ...[...this.finished.values()].filter((x) => !live.has(x.address))];
     const extras = terms.filter((x) => !this.listed.has(x.address) && !inPanes.has(x.address) && bgVisible(x, now, this.dismissed)
-      && (isJob(x.name) || !this.listed.has(x.parent)) && !orchOf(x.name));
+      && (isJob(x.name) || !this.listed.has(x.parent)) && !orchOf(x.name))
+      .concat(this.sleepers ?? []);
     // Background terminals whose CPU and memory the timer reads: extras and agents' kids.
     this.bg = all.filter((x) => x.state === "live" && !this.listed.has(x.address) && !inPanes.has(x.address)).map((x) => x.address);
     const tree = buildTree(list.map((a) => ({ ...a, name: nameOf(a), cwd: cwdOf(a), rank: rankOf(a) || RANK.idle, since: this.since(a), seq: a.seq ?? 0 })), { org, byPriority, extras });
-    const extraEls = (x) => [isJob(x.name) ? this.jobRow(t, x) : this.bgRow(t, x)];
+    const extraEls = (x) => [x.sleeping ? this.sleepRow(t, x, now) : isJob(x.name) ? this.jobRow(t, x) : this.bgRow(t, x)];
     const jobsGroup = (id, jobs) => (jobs.length ? [div().id(id).px(8).h(22).flex_none().flex().items_center().text_size(11).text_color(t.dim).child("Jobs"),
       ...jobs.map((j) => this.jobRow(t, j))] : []);
     // Projects whose summary the timer reads, with the space to open.
