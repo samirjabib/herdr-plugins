@@ -149,6 +149,7 @@ export default class Agents extends View {
         if (JSON.stringify(next) !== JSON.stringify(this.sleepers)) { this.sleepers = next; cx.notify(); }
       } catch {} // core down: keep the last list
     };
+    this.refreshSleepers = sleepers;
     cx.spawn(sleepers);
     cx.timer.every(15000, (cx) => cx.spawn(sleepers));
     // Colors change rarely: once a minute is enough, and the core only reads one small file.
@@ -405,25 +406,46 @@ export default class Agents extends View {
       .when(l === "└" || l === "├", el => el.border_b(1.5).rounded_bl(6)));
   }
 
-  // A sleeping agent: its task, dimmed, and a small zzz with how long it has slept. Hover: its
-  // recap. Click: wake it (ws agent wake), which resumes the same conversation in its tab.
+  // A sleeping agent: the Claude icon dimmed with a zzz floating over it, its task in grey and
+  // how long it has slept. Hover: its recap, and a Wake button (ws agent wake), which resumes
+  // the same conversation in its tab.
   sleepRow(t, s, now) {
     const key = `sleep-${s.name}`;
-    const ago = s.since ? duration(now - s.since) : "";
-    return h_flex().id(key).px(8).h(30).flex_none().rounded(8).items_center().gap(7).cursor_pointer()
-      .hover((el) => el.bg(t.hover))
-      .tooltip(sleepTip(s, ago))
+    const ago = s.since > 1e12 ? duration(now - s.since) : "";
+    const waking = this.waking === s.name;
+    const icon = div().relative().w(16).h(16).flex_none()
+      .child(image("icons/claude.svg").w(14).h(14).mt(2).opacity(0.4))
+      .child(div().absolute().left(9).top(-6).text_size(9).font_semibold().text_color(t.accent)
+        .frames(["z", "zz", "zzz", "zzz"], 650).loop("opacity", { from: 0.35, to: 1, period: 2600 }));
+    const wake = div().id(`wake-${s.name}`).flex_none().px(7).h(20).rounded(5).flex().items_center()
+      .text_size(11).bg(t.accent + "24").text_color(t.accent).cursor_pointer()
+      .hover((el) => el.bg(t.accent + "40"))
       .on_click((_e, cx) => {
-        if (this.waking === s.name) return;
+        cx.stop_propagation();
+        if (this.waking) return;
         this.waking = s.name;
         cx.notify();
-        exec("/bin/zsh", ["-c", '"$HOME/mac-workspace/bin/ws" agent wake "$1"', "wake", s.name]).catch(() => null)
-          .finally(() => { this.waking = null; });
+        cx.spawn(async (cx) => {
+          await exec("/bin/zsh", ["-c", '"$HOME/mac-workspace/bin/ws" agent wake "$1"', "wake", s.name]).catch(() => null);
+          this.waking = null;
+          await this.refreshSleepers?.(cx);
+          cx.notify();
+        });
       })
-      .child(image("icons/claude.svg").w(14).h(14).flex_none().opacity(0.45))
+      .child("Wake");
+    return h_flex().id(key).px(8).h(30).flex_none().rounded(8).items_center().gap(7)
+      .hover((el) => el.bg(t.hover))
+      .on_hover((on, cx) => {
+        if (on) this.hovered = key;
+        else if (this.hovered === key) this.hovered = null;
+        cx.notify();
+      })
+      .tooltip(sleepTip(s, ago))
+      .child(icon)
       .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(s.title))
-      .child(div().flex_none().text_size(11).text_color(t.dim).child(this.waking === s.name ? "waking…" : ago))
-      .child(div().flex_none().w(22).text_right().text_size(11).text_color(t.muted).child("zzz"));
+      .when(waking, (el) => el.child(div().flex_none().text_size(11).text_color(t.accent).frames(["waking", "waking.", "waking..", "waking..."], 300)))
+      .when(!waking && this.hovered === key, (el) => el.child(wake))
+      .when(!waking && this.hovered !== key && Boolean(ago), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(ago)));
   }
 
   // A background terminal (no agent status: a dev server, a test run an agent started with
@@ -640,7 +662,8 @@ export default class Agents extends View {
     const terms = [...all, ...[...this.finished.values()].filter((x) => !live.has(x.address))];
     const extras = terms.filter((x) => !this.listed.has(x.address) && !inPanes.has(x.address) && bgVisible(x, now, this.dismissed)
       && (isJob(x.name) || !this.listed.has(x.parent)) && !orchOf(x.name))
-      .concat(this.sleepers ?? []);
+      // A sleeper whose terminal is live again (just woken) is an agent row, not a zzz.
+      .concat((this.sleepers ?? []).filter((z) => !all.some((x) => x.state === "live" && x.name === z.name)));
     // Background terminals whose CPU and memory the timer reads: extras and agents' kids.
     this.bg = all.filter((x) => x.state === "live" && !this.listed.has(x.address) && !inPanes.has(x.address)).map((x) => x.address);
     const tree = buildTree(list.map((a) => ({ ...a, name: nameOf(a), cwd: cwdOf(a), rank: rankOf(a) || RANK.idle, since: this.since(a), seq: a.seq ?? 0 })), { org, byPriority, extras });

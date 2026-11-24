@@ -295,6 +295,7 @@ test("sleepersOf keeps the core's sleeping agents as tree extras under their che
     { name: "hcp", title: "HCP reviews", cwd: `${R}/cs/site/worktrees/hcp`, sleeping: true, sinceMs: 5, recap: "Goal: x" },
     { name: "awake", cwd: `${R}/cs/site/main`, state: "idle" },
     { name: "bad name", cwd: `${R}/cs/site/main`, sleeping: true },
+    { name: "--flag", cwd: `${R}/cs/site/main`, sleeping: true },
     { name: "lids", cwd: `${R}/ag/lids/main`, state: "sleeping" },
   ]);
   assert.deepEqual(got.map((s) => s.address), ["sleep:hcp", "sleep:lids"]);
@@ -308,6 +309,6 @@ test("sleepersOf keeps the core's sleeping agents as tree extras under their che
 
 test("sleepTip says how long, the recap's first lines, and that a click wakes it", () => {
   const tip = sleepTip({ recap: "RECAP-BEGIN ab\nGoal: ship\nDone: a\nNext: b\nOpen questions: none\nmore\nRECAP-END ab" }, "1h");
-  assert.equal(tip, "Asleep 1h · summary saved in Engram\nGoal: ship\nDone: a\nNext: b\nOpen questions: none\nClick to wake it (same conversation, same tab)");
-  assert.equal(sleepTip({ recap: null }, ""), "Asleep · summary saved in Engram\nClick to wake it (same conversation, same tab)");
+  assert.equal(tip, "Asleep 1h · summary saved in Engram\nGoal: ship\nDone: a\nNext: b\nOpen questions: none\nWake resumes it: same conversation, same tab");
+  assert.equal(sleepTip({ recap: null }, ""), "Asleep · summary saved in Engram\nWake resumes it: same conversation, same tab");
 });

@@ -21,9 +21,10 @@ go to sleep and come back where they were.
 - **Sleeping agents in the tree** (`agents-tree`). mac-workspace puts idle agents
   to sleep (summary in Engram, terminal ended); the tree reads them from Collie's
   core (`/api/agents`, every 15 s) and keeps each under its checkout: the Claude
-  icon dimmed, its task in grey, how long it has slept and a small `zzz`. Hover:
-  its recap's first lines. Click: `ws agent wake <name>`, which resumes the same
-  conversation in its tab.
+  icon dimmed with a `z → zz → zzz` floating over it, its task in grey and how long
+  it has slept. Hover: its recap's first lines and a **Wake** button
+  (`ws agent wake <name>`), which resumes the same conversation in its tab. A
+  sleeper whose terminal is live again shows as its agent row.
 - **The tab bar by level** (`tabs-level`, a copy of Herdr's `tabs`). It shows only
   the tabs on the active tab's level: the same checkout (`<project>/main` or one
   worktree) or, for an orchestrator, the same org root (`~/mac-workspace/<org>`).
