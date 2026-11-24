@@ -409,7 +409,7 @@ export default class Agents extends View {
       .when(l === "└" || l === "├", el => el.border_b(1.5).rounded_bl(6)));
   }
 
-  // A quiet sleep tag: "asleep", "zzz 2" on a project or org, "zzz 4m" on an idle agent.
+  // A quiet sleep tag: "zzz 2" on an org, "zzz 4m" on an idle agent.
   sleepTag(t, id, text, tip) {
     return div().id(id).flex_none().px(5).h(16).rounded(4).flex().items_center().text_size(10.5)
       .bg(t.accent + "1a").text_color(t.accent).tooltip(tip).child(text);
@@ -452,7 +452,6 @@ export default class Agents extends View {
       .tooltip(sleepTip(s, ago))
       .child(icon)
       .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(s.title))
-      .when(!waking, (el) => el.child(this.sleepTag(t, `${key}-tag`, "asleep", "Asleep: its summary is saved in Engram and its terminal ended, so it uses no CPU or memory")))
       .when(waking, (el) => el.child(div().flex_none().text_size(11).text_color(t.accent).frames(["waking", "waking.", "waking..", "waking..."], 300)))
       .when(!waking && this.hovered === key, (el) => el.child(wake))
       .when(!waking && this.hovered !== key && Boolean(ago), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(ago)));
@@ -600,7 +599,6 @@ export default class Agents extends View {
         .children(facts.map((f) => (f.kind === "github"
           ? svg("mods/agents-tree/github.svg").id(`${key}-gh`).size(11).flex_none().text_color(t.dim).tooltip(f.tip)
           : div().id(`${key}-${f.kind}`).flex_none().text_color(f.warn ? t.ansi1 : t.dim).tooltip(f.tip).child(f.text)))))
-      .when(asleepIn(p) > 0, (el) => el.child(this.sleepTag(t, `${key}-zzz`, `zzz ${asleepIn(p)}`, `${asleepIn(p)} agent${asleepIn(p) === 1 ? "" : "s"} asleep in ${p.name}`)))
       .when(kids.length > 0, (el) => el.child(this.nodeFold(t, key, kids.length, top)))
       .when(Boolean(p.orch), (el) => el.child(this.status(t, { status: statusOf(p.orch) }, true)));
   }

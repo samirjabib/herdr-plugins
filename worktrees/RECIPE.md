@@ -22,11 +22,11 @@ go to sleep and come back where they were.
   to sleep (summary in Engram, terminal ended); the tree reads them from Collie's
   core (`/api/agents`, every 15 s) and keeps each under its checkout: the Claude
   icon dimmed with a `z → zz → zzz` floating over it, its task in grey and how long
-  it has slept. Hover: its recap's first lines and a **Wake** button
+  it has slept. Hover: its recap (Goal, Done, Next; from its Engram session summary
+  when it printed none) and a **Wake** button
   (`ws agent wake <name>`), which resumes the same conversation in its tab. A
   sleeper whose terminal is live again shows as its agent row.
-  Quick tags, in the accent: `asleep` on each sleeper, `zzz N` on a project or org
-  holding N sleepers, and `zzz 12m` (`zzz soon` in its last minute) on an idle
+  Quick tags, in the accent: `zzz N` on an org holding N sleepers, and `zzz 12m` (`zzz soon` in its last minute) on an idle
   agent: when auto-sleep will take it (the core's `sleepAtMs`; orchestrators and
   your own sessions never get one).
 - **The tab bar by level** (`tabs-level`, a copy of Herdr's `tabs`). It shows only
