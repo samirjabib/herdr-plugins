@@ -116,10 +116,13 @@ go to sleep and come back where they were.
   a quiet `orchestrator` tag in its org's color from the mac-workspace app's
   core, else its space's), muted with `off` when not running; under each, its
   org's projects with live agents (by the agent's folder:
-  `<org>/<project>/main|worktrees/...`); under each project, its workers grouped
-  by checkout: a `main` header (accent branch glyph) first, then one header per
-  worktree (its folder name), each folding with a chevron and holding its agents
-  (several in one checkout stay together) and background terminals. A worker
+  `<org>/<project>/main|worktrees/...`). A project row IS its lead on main: the
+  project's orchestrator (`orch-<org>-<project>`), else the agent in its main
+  checkout (the first, or the most urgent under Priority). There is no `main`
+  header: other agents and background terminals on main hang right under the
+  project row, then one header per worktree (its folder name), each folding
+  with a chevron and holding its agents (several in one checkout stay
+  together) and background terminals. A worker
   row says the task (a named tab or the agent's title), the time in its state,
   and the state; outside a checkout group (pinned) it keeps a `⑂ main` /
   `⑂ <worktree>` tag. Agents outside the orgs sit under `Other`.
@@ -127,14 +130,16 @@ go to sleep and come back where they were.
   (`all`, `cs`, `ag`, `personal`, `other`); an org picked shows the Boss, that
   org's orchestrator and its agents. Seats, projects and agents fold with a
   chevron; pinned agents leave the tree for a `Pinned` group on top; the sort
-  (Priority / Grouped) orders projects and workers. A project's own
-  orchestrator (`orch-<org>-<project>`), when running, is its project row.
-  - **Project row**: name, then only what needs saying: `⚠ <branch>` when its
+  (Priority / Grouped) orders projects and workers.
+  - **Project row**: the lead's program icon, the project name, then only what needs saying: `⚠ <branch>` when its
     main checkout is on another branch, `↓N` when local main is behind
     `origin/main` (as last fetched; never fetches), `⑂ N` registered worktrees
     and a GitHub mark when a remote points there. Read from `.git/HEAD`,
     `.git/config` and `.git/worktrees` every 15 s, `git rev-list` once a
-    minute, never during a check. Click: its orchestrator, else its space.
+    minute, never during a check. Then the lead's processes chip, sleep
+    countdown and state; its sub-agents hang under the row. Click: focuses the
+    lead. With no agent on main it reads like an off seat: a muted folder and
+    name, no state, and a click opens the space its first worker is in.
   - **Processes** (`>_ N` on an agent row, folded by default): the live
     processes under the agent's terminal (one `ps -axo pid,ppid,pcpu,rss,command`
     every 5 s while the sidebar is wide; the terminal's pid from `hc get`),

@@ -391,14 +391,13 @@ export default class Agents extends View {
       .child(div().flex_1().truncate().text_color(s.wt === "main" ? t.accent : t.dim).child(s.wt));
   }
 
-  // A checkout group's header under a project: a branch glyph and "main" or the worktree's
-  // name, with its fold. Its agents and background terminals hang under it.
+  // A worktree's header under its project: a branch glyph and the worktree's name, with its
+  // fold. Its agents and background terminals hang under it (main is the project row itself).
   checkoutRow(t, key, place, count, top) {
-    const main = place === "main";
     return h_flex().id(key).px(8).h(24).flex_none().rounded(8).items_center().gap(6).text_size(12)
-      .tooltip(main ? "The main checkout" : `Worktree ${place}`)
-      .child(svg("mods/workspace-chrome/git-branch.svg").size(12).flex_none().text_color(main ? t.accent : t.dim))
-      .child(div().flex_1().min_w(0).truncate().text_color(main ? t.accent : t.muted).child(place))
+      .tooltip(`Worktree ${place}`)
+      .child(svg("mods/workspace-chrome/git-branch.svg").size(12).flex_none().text_color(t.dim))
+      .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(place))
       .child(this.nodeFold(t, key, count, top));
   }
 
@@ -581,26 +580,37 @@ export default class Agents extends View {
   }
 
   // A project row: its name, the quiet summary (⚠ branch, ↓N, ⑂ N, GitHub) and its fold.
-  // Its own orchestrator (orch-<org>-<project>), when running, is the row: a click focuses
-  // it and its state shows. Else a click opens the space its first worker is in.
-  projectRow(t, p, statusOf) {
+  // The row IS the project's lead on main (its orchestrator orch-<org>-<project>, else the
+  // agent in the main checkout): its program icon, state, processes and sleep countdown show,
+  // and a click focuses it. With no agent on main it reads like an off seat: a muted folder and
+  // name, no state, and a click opens the space its first worker is in.
+  projectRow(t, p, leadTask, now) {
     const facts = projectSummary(this.facts.get(p.base));
     const key = `proj-${p.org}-${p.name}`;
+    const lead = p.lead;
     const kids = p.workers;
+    const count = kids.length + p.background.length + p.jobs.length;
     const top = kids.reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
-    const space = (p.orch ?? kids[0])?.space;
-    return h_flex().id(key).px(8).h(28).flex_none().rounded(8).items_center().gap(7).cursor_pointer()
+    const space = (lead ?? kids[0])?.space;
+    const pic = lead ? icon(lead.program, 16, t.foreground) : null;
+    const eta = !lead || lead.status === "working" || lead.status === "blocked" ? null : sleepsIn(this.etas?.get(lead.address), now);
+    const procs = lead ? this.procChip(t, lead) : null;
+    const idle = lead?.status === "idle" && !lead.focused;
+    return h_flex().id(key).px(8).h(30).flex_none().rounded(8).items_center().gap(7).cursor_pointer()
       .hover((s) => s.bg(t.hover))
-      .when(Boolean(p.orch?.focused), (el) => el.bg(t.selected))
-      .on_click(() => (p.orch ? run("pane.focus", { pane: p.orch.pane }) : space && run("space.select", { id: space })))
-      .child(svg("mods/workspace-chrome/folder.svg").size(13).flex_none().text_color(t.muted))
-      .child(div().min_w(0).flex_shrink(1).truncate().text_color(t.foreground).child(p.name))
+      .when(Boolean(lead?.focused), (el) => el.bg(t.selected))
+      .tooltip(lead ? `${p.name} on main${leadTask ? `: ${leadTask}` : ""}. Its worktrees hang under it` : `${p.name}: no agent on main`)
+      .on_click(() => (lead ? run("pane.focus", { pane: lead.pane }) : space && run("space.select", { id: space })))
+      .child(pic ?? svg("mods/workspace-chrome/folder.svg").size(13).flex_none().text_color(t.dim))
+      .child(div().min_w(0).flex_shrink(1).truncate().text_color(!lead ? t.dim : idle ? t.muted : t.foreground).child(p.name))
       .child(h_flex().flex_1().min_w(0).gap(6).items_center().text_size(11).overflow_hidden()
         .children(facts.map((f) => (f.kind === "github"
           ? svg("mods/agents-tree/github.svg").id(`${key}-gh`).size(11).flex_none().text_color(t.dim).tooltip(f.tip)
           : div().id(`${key}-${f.kind}`).flex_none().text_color(f.warn ? t.ansi1 : t.dim).tooltip(f.tip).child(f.text)))))
-      .when(kids.length > 0, (el) => el.child(this.nodeFold(t, key, kids.length, top)))
-      .when(Boolean(p.orch), (el) => el.child(this.status(t, { status: statusOf(p.orch) }, true)));
+      .when(Boolean(procs), (el) => el.child(procs))
+      .when(Boolean(eta), (el) => el.child(this.sleepTag(t, `eta-${lead.address}`, eta, "Auto-sleep puts it to sleep then: its summary goes to Engram and its terminal ends")))
+      .when(count > 0, (el) => el.child(this.nodeFold(t, key, count, top)))
+      .when(Boolean(lead), (el) => el.child(this.status(t, lead, true)));
   }
 
   // An agent's live processes, unfolded: name, CPU and memory, on tree lines.
@@ -683,7 +693,7 @@ export default class Agents extends View {
     this.bases = new Map(tree.seats.flatMap((s) => s.projects.map((p) => [p.base, p])));
     // The order agent.next walks: the tree's, top to bottom.
     const order = [...tree.pinned, ...(tree.boss ? [tree.boss] : []), ...tree.root.filter((a) => this.listed.has(a.address)), ...tree.seats.flatMap((s) => [
-      ...(s.orch ? [s.orch] : []), ...s.projects.flatMap((p) => [...(p.orch ? [p.orch] : []), ...p.workers]), ...s.loose])];
+      ...(s.orch ? [s.orch] : []), ...s.projects.flatMap((p) => [...(p.lead ? [p.lead] : []), ...p.workers]), ...s.loose])];
     setAgentOrder(order.map((a) => a.address));
     if (collapsed) list = order;
 
@@ -852,12 +862,11 @@ export default class Agents extends View {
       .child(div().flex_none().text_size(11).text_color(t.dim).child(o === "other" ? "outside the orgs" : "off"));
 
     // An org's seat: its orchestrator (or the off row), then its projects and their workers.
-    const statusOf = (a) => a.status;
     const seatEls = (s, i) => {
       const key = `seat-${s.org}`;
       const head = s.orch ? withKids(s.orch, i, listedAgents) : [offRow(s.org)];
       const count = s.projects.length + s.loose.length + s.jobs.length;
-      const top = [...s.projects.flatMap((p) => p.workers), ...s.loose].reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
+      const top = [...s.projects.flatMap((p) => [...(p.lead ? [p.lead] : []), ...p.workers]), ...s.loose].reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
       if (!count) return head;
       const [first, ...rest] = head;
       const zzz = asleepIn(s);
@@ -865,8 +874,7 @@ export default class Agents extends View {
         .when(zzz > 0, (el) => el.child(this.sleepTag(t, `${key}-zzz`, `zzz ${zzz}`, `${zzz} agent${zzz === 1 ? "" : "s"} asleep in ${ORG_LABEL[s.org] ?? s.org}`)))
         .child(this.nodeFold(t, key, count, top));
       if (this.folded.has(key)) return [headRow, ...rest];
-      // A project's agents by checkout: a "main" header, then one per worktree, each with its
-      // agents and background terminals under it.
+      // A project's worktrees: one header per worktree, its agents and background terminals under it.
       const checkoutEls = (pk, c) => {
         const ck = `${pk}-co-${c.place}`;
         const top = c.workers.reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
@@ -876,9 +884,13 @@ export default class Agents extends View {
       };
       const projectEls = (p) => {
         const pk = `proj-${p.org}-${p.name}`;
-        const pr = this.projectRow(t, p, statusOf);
-        return this.folded.has(pk) ? [pr] : [pr, ...this.branches(t, `${pk}-w`, [...p.checkouts.map((c) => checkoutEls(pk, c)),
-          jobsGroup(`${pk}-jobs`, p.jobs)], 10)];
+        const pr = this.projectRow(t, p, p.lead ? detail.get(p.lead.address) : null, now);
+        if (this.folded.has(pk)) return [pr];
+        // The lead's own sub-agents and processes (its row is the project row), then the rest
+        // of the main checkout with no header, then each worktree.
+        const leadKids = p.lead ? withKids(p.lead, 0, null, true).slice(1) : [];
+        return [pr, ...leadKids, ...this.branches(t, `${pk}-w`, [...p.main.workers.map((a) => withKids(a, 0, null, true)),
+          ...p.main.background.map(extraEls), ...p.checkouts.map((c) => checkoutEls(pk, c)), jobsGroup(`${pk}-jobs`, p.jobs)], 10)];
       };
       return [headRow, ...rest, ...this.branches(t, `${key}-p`, [jobsGroup(`${key}-jobs`, s.jobs), ...s.projects.map(projectEls),
         ...s.loose.map((a) => (this.listed.has(a.address) ? withKids(a, 0) : extraEls(a)))], 12)];

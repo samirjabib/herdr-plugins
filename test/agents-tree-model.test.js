@@ -40,11 +40,11 @@ test("the tree is Boss -> each org orchestrator -> its projects -> the agents wo
   assert.deepEqual(tree.seats.map((s) => s.org), ["cs", "ag", "personal"]);
   const agSeat = tree.seats.find((s) => s.org === "ag");
   assert.equal(agSeat.orch.address, "t2");
-  assert.deepEqual(agSeat.projects.map((p) => [p.name, p.workers.map((w) => w.address)]), [["shop", ["t3", "t4"]]]);
+  assert.deepEqual(agSeat.projects.map((p) => [p.name, p.lead.address, p.workers.map((w) => w.address)]), [["shop", "t3", ["t4"]]]);
   // An org whose orchestrator isn't running still holds its agents, under an off seat.
   const cs = tree.seats.find((s) => s.org === "cs");
   assert.equal(cs.orch, null);
-  assert.deepEqual(cs.projects[0].workers.map((w) => w.address), ["t5"]);
+  assert.equal(cs.projects[0].lead.address, "t5");
   // Personal has neither: an empty off seat (only under All).
   assert.deepEqual(tree.seats.find((s) => s.org === "personal").projects, []);
 });
@@ -89,10 +89,10 @@ test("priority sorts projects and workers by urgency then recency; grouped keeps
   const seat = (o) => buildTree(list, o).seats.find((s) => s.org === "ag");
   const pri = seat({ byPriority: true });
   assert.deepEqual(pri.projects.map((p) => p.name), ["two", "one"]);
-  assert.deepEqual(pri.projects[1].workers.map((w) => w.address), ["c", "d", "a"]);
+  assert.deepEqual([pri.projects[1].lead.address, pri.projects[1].workers.map((w) => w.address)], ["a", ["c", "d"]]);
   const grouped = seat({ byPriority: false });
   assert.deepEqual(grouped.projects.map((p) => p.name), ["one", "two"]);
-  assert.deepEqual(grouped.projects[0].workers.map((w) => w.address), ["a", "c", "d"]);
+  assert.deepEqual([grouped.projects[0].lead.address, grouped.projects[0].workers.map((w) => w.address)], ["a", ["c", "d"]]);
 });
 
 test("the main checkout's branch comes from its HEAD file (empty when detached)", () => {
@@ -266,7 +266,7 @@ test("jobs and parentless background terminals sit where they run: root under th
   assert.deepEqual(tree.seats.find((s) => s.org === "cs").projects.map((p) => [p.name, p.workers.length, p.background.length]), [["site", 0, 1]]);
 });
 
-test("a project's agents are grouped by checkout: main first, then each worktree, several agents of one checkout together", () => {
+test("a project's lead is its orchestrator on main; worktrees hang under it, with no main checkout group", () => {
   const tree = buildTree([
     ag("t1", `${R}/ag/shop/worktrees/fix-cart`),
     ag("t2", `${R}/ag/shop/main/src`),
@@ -275,20 +275,43 @@ test("a project's agents are grouped by checkout: main first, then each worktree
     ag("t5", `${R}/ag/shop/main`, { name: "orch-ag-shop" }),
   ], { extras: [{ address: "b1", name: null, cwd: `${R}/ag/shop/worktrees/nav` }, { address: "b2", name: null, cwd: `${R}/ag/shop/main` }] });
   const shop = tree.seats.find((s) => s.org === "ag").projects[0];
+  // The project row IS its lead: the project orchestrator wins over another agent on main.
+  assert.equal(shop.lead.address, "t5");
+  assert.equal(shop.orch.address, "t5");
+  // Other agents and terminals on main sit right under the lead, with no "main" header.
+  assert.deepEqual([shop.main.workers.map((w) => w.address), shop.main.background.map((b) => b.address)], [["t2"], ["b2"]]);
   assert.deepEqual(shop.checkouts.map((c) => [c.place, c.workers.map((w) => w.address), c.background.map((b) => b.address)]), [
-    ["main", ["t2"], ["b2"]],
     ["fix-cart", ["t1", "t4"], []],
     ["nav", ["t3"], ["b1"]],
   ]);
-  // The project's own orchestrator is its row, in no group; the flat list still holds every worker.
-  assert.equal(shop.orch.address, "t5");
+  // The flat list holds every worker but the lead.
   assert.deepEqual(shop.workers.map((w) => w.address), ["t1", "t2", "t3", "t4"]);
 });
 
-test("a project with agents only in main has one main group; byPriority orders inside each group", () => {
-  const tree = buildTree([ag("t1", `${R}/cs/site/main`, { rank: 1 }), ag("t2", `${R}/cs/site/main`, { rank: 4 })], { byPriority: true });
+test("with no project orchestrator, the first agent in the main checkout is the lead", () => {
+  const tree = buildTree([ag("t1", `${R}/ag/cro-loop/worktrees/a`), ag("t2", `${R}/ag/cro-loop/main`), ag("t3", `${R}/ag/cro-loop/main`)]);
+  const p = tree.seats.find((s) => s.org === "ag").projects[0];
+  assert.equal(p.lead.address, "t2");
+  assert.equal(p.orch, null);
+  assert.deepEqual(p.main.workers.map((w) => w.address), ["t3"]);
+  assert.deepEqual(p.workers.map((w) => w.address), ["t1", "t3"]);
+  assert.deepEqual(p.checkouts.map((c) => [c.place, c.workers.map((w) => w.address)]), [["a", ["t1"]]]);
+});
+
+test("a project with no agent on main has no lead: its worktrees still hang under the plain row", () => {
+  const tree = buildTree([ag("t1", `${R}/ag/shop/worktrees/a`)], { extras: [{ address: "b1", name: null, cwd: `${R}/ag/shop/main` }] });
+  const shop = tree.seats.find((s) => s.org === "ag").projects[0];
+  assert.equal(shop.lead, null);
+  assert.deepEqual(shop.main.background.map((b) => b.address), ["b1"]);
+  assert.deepEqual(shop.checkouts.map((c) => [c.place, c.workers.map((w) => w.address)]), [["a", ["t1"]]]);
+});
+
+test("byPriority picks the most urgent agent on main as the lead and orders the rest", () => {
+  const tree = buildTree([ag("t1", `${R}/cs/site/main`, { rank: 1 }), ag("t2", `${R}/cs/site/main`, { rank: 4 }), ag("t3", `${R}/cs/site/main`, { rank: 2 })], { byPriority: true });
   const site = tree.seats.find((s) => s.org === "cs").projects[0];
-  assert.deepEqual(site.checkouts.map((c) => [c.place, c.workers.map((w) => w.address)]), [["main", ["t2", "t1"]]]);
+  assert.equal(site.lead.address, "t2");
+  assert.deepEqual(site.main.workers.map((w) => w.address), ["t3", "t1"]);
+  assert.deepEqual(site.checkouts, []);
 });
 
 test("sleepersOf keeps the core's sleeping agents as tree extras under their checkout", () => {

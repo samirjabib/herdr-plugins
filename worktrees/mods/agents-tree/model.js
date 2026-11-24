@@ -54,9 +54,11 @@ const byUrgency = (x, y) => y.rank - x.rank || y.since - x.since || y.seq - x.se
 // The tree. `list`: agents in the list's order, each { address, name, cwd, rank, since, seq,
 // pinned, space }. Returns { boss, pinned, jobs, root, seats: [{ org, orch, projects, loose }] }:
 // `root` the agents and background terminals at the workspace root: the Boss's helpers, shown at its level; each
-// project { org, name, base, orch, workers, checkouts, rank, since }, `checkouts` its workers
-// and background terminals by checkout ({ place, workers, background }: "main" first, then each
-// worktree as first met), `loose` the org's agents outside a
+// project { org, name, base, orch, lead, workers, main, checkouts, rank, since }: `lead` the agent
+// the project row IS (its orchestrator orch-<org>-<project>, else the first agent in the main
+// checkout; null when none runs there), `workers` every other agent, `main` the other agents and
+// background terminals in the main checkout ({ workers, background }, right under the lead),
+// `checkouts` each worktree's ({ place, workers, background }, as first met); `loose` the org's agents outside a
 // project. Under All every org seat shows (an off one too) and Other only with agents; an org
 // picked shows only its seat. Pinned workers leave the tree (orchestrators keep their seat).
 // byPriority: projects and workers by urgency, then recency; else in the list's order.
@@ -75,7 +77,7 @@ export function buildTree(list, { org = "all", byPriority = false, extras = [] }
   const projectNode = (p) => {
     const key = `${p.org}/${p.name}`;
     if (!projects.has(key)) {
-      const node = { ...p, orch: null, workers: [], checkouts: [], jobs: [], background: [], rank: 0, since: 0, seq: 0 };
+      const node = { ...p, orch: null, lead: null, workers: [], main: { workers: [], background: [] }, checkouts: [], jobs: [], background: [], rank: 0, since: 0, seq: 0 };
       projects.set(key, node);
       seats.get(p.org).projects.push(node);
     }
@@ -119,23 +121,28 @@ export function buildTree(list, { org = "all", byPriority = false, extras = [] }
       seat.loose.sort(byUrgency);
     }
   }
-  for (const seat of seats.values()) for (const p of seat.projects) p.checkouts = byCheckout(p.workers, p.background);
+  for (const seat of seats.values()) for (const p of seat.projects) leadAndCheckouts(p);
   const shown = (s) => (org === "all" ? s.org !== "other" || s.projects.length || s.loose.length || s.jobs.length : s.org === org);
   return { boss, pinned, jobs, root: [...root, ...rootTerms], seats: [...seats.values()].filter(shown) };
 }
 
-// A project's workers and background terminals grouped by the checkout they run in: the main
-// checkout first, then each worktree in the order first met; each group keeps its order.
-function byCheckout(workers, background) {
-  const groups = new Map([["main", { place: "main", workers: [], background: [] }]]);
+// A project's lead (its orchestrator, else its first agent on main, taken out of `workers`),
+// the rest of the main checkout (`main`), and each worktree's agents and background terminals
+// (`checkouts`, in the order first met); each group keeps its order.
+function leadAndCheckouts(p) {
+  const onMain = (x) => (placeOf(x.cwd) ?? "main") === "main";
+  p.lead = p.orch ?? p.workers.find(onMain) ?? null;
+  if (p.lead && p.lead !== p.orch) p.workers = p.workers.filter((a) => a !== p.lead);
+  const groups = new Map();
   const at = (x) => {
-    const place = placeOf(x.cwd) ?? "main";
+    if (onMain(x)) return p.main;
+    const place = placeOf(x.cwd);
     if (!groups.has(place)) groups.set(place, { place, workers: [], background: [] });
     return groups.get(place);
   };
-  for (const a of workers) at(a).workers.push(a);
-  for (const b of background) at(b).background.push(b);
-  return [...groups.values()].filter((g) => g.workers.length || g.background.length);
+  for (const a of p.workers) at(a).workers.push(a);
+  for (const b of p.background) at(b).background.push(b);
+  p.checkouts = [...groups.values()];
 }
 
 // The branch a HEAD file names ("" when detached), null when it couldn't be read.
