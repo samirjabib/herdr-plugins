@@ -135,6 +135,20 @@ go to sleep and come back where they were.
     else its space's), Project lead on main (accent), Worker in `<worktree>`
     (muted), Helper (dim). The place chip is as quiet: a branch glyph and
     `main` or the worktree, dim. The sleep countdown is dim text (`zzz 14m`).
+  - **Messages** (`hc send`): Herdr gives a mod no send events, so they come
+    from the mac-workspace core's history ledger (`GET /api/history`, read
+    every 5 s while the sidebar shows, keyed by entry id; the first read only
+    marks what is there). A new message: a small paw (`paw.svg`) slides out of
+    the sender's row and fades, lights in turn on each row between, and the
+    receiver's row glows (native `transition` and `loop`; timers only flip
+    the steps). The receiver keeps an accent dot until it is focused or
+    answers its sender; hover: `from <name>: <first words>`. Nothing when
+    the receiver is the one in focus; no toast, no sound. The endpoint
+    missing (404) shows nothing.
+  - **History**: a click on the dot, or the history icon on a hovered row,
+    opens a quiet chat below that row (`/api/history?terminal=<address>`):
+    bubbles oldest first with sender and time (its own on the right), state
+    changes as thin dim lines; `No history yet` when the ledger isn't there.
   The tree follows the Spaces workspace switcher (and so Collie): `spaces.org`
   (`all`, `cs`, `ag`, `personal`, `other`); an org picked shows the Boss, that
   org's lead and its agents. Seats, projects and agents fold with a

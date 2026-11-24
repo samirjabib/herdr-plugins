@@ -8,6 +8,7 @@ import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, hc, readTextFile, checking } from "herdr";
 import * as fs from "fs/promises";
 import { helperLabels, helperBadge, projectLook, roleMark, roleOf, placeOf, orchOf, orgRootOf, isJob, buildTree, headBranch, hasGithub, projectSummary, parsePs, processTree, plumbingNote, procTotal, formatMem, bgState, bgLabel, bgVisible, sleepersOf, sleepTip, sleepEtas, sleepsIn, asleepIn, jobInfo } from "./model.js";
+import { historyUrl, ingestHistory, historyItems, clearDots, liveFlights, flightRows, dotTip, emptyFlights, FLIGHT_MS } from "./flight.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -128,6 +129,12 @@ export default class Agents extends View {
     if (!Array.isArray(this.pendingPins)) this.pendingPins = [];
     if (!this.pendingPins.length) localStorage.removeItem("pins");
     this.migratingPins = new Set();
+    // Messages between terminals (hc send), from the history ledger: the entries seen, each
+    // receiver's dot and the flights in the air. The first read only marks what is there.
+    this.msgs = emptyFlights();
+    this.phase = new Map(); // flight -> 1 (glyph out, paws lit) | 2 (paws fading)
+    this.history = new Map(); // agent -> its history panel ({ items } or { missing })
+    this.historyOpen = null; // the agent whose history is open
     cx.timer.every(30000, (cx) => cx.notify());
     // The org colors picked in the mac-workspace app, through its core (the bridge between the
     // two apps): shared as "workspace.colors" so every mod can paint an org the same way.
@@ -174,7 +181,7 @@ export default class Agents extends View {
     this.facts = new Map(); // project folder -> { branch, worktrees, github, behind, at, behindAt }
     this.bases = new Map(); // project folders the tree shows -> the space to open
     if (checking()) return;
-    cx.timer.every(5000, (cx) => this.refreshProcs(cx));
+    cx.timer.every(5000, (cx) => { this.refreshProcs(cx); this.refreshMessages(cx); });
     cx.timer.every(15000, (cx) => this.refreshFacts(cx));
     // The first look soon after start, once the tree has named its projects.
     cx.timer.after(1500, (cx) => { this.refreshProcs(cx); this.refreshFacts(cx); });
@@ -283,6 +290,117 @@ export default class Agents extends View {
     const listed = new Set(list.map((a) => a.address));
     for (const [k, c] of Object.entries(this.changed)) if (!listed.has(k) && now - c.at > 30 * 86400000) delete this.changed[k];
     localStorage.setItem("changed", JSON.stringify(this.changed));
+  }
+
+  // Messages (`hc send`) from the history ledger, on the refresh tick: Herdr tells a mod
+  // nothing about a send. New message entries fly, keyed by entry id. The endpoint missing
+  // (404, core down) changes nothing: no paws, no dots.
+  refreshMessages(cx) {
+    if (this.readingMsgs || !this.shown()) return;
+    this.readingMsgs = true;
+    cx.spawn(async (cx) => {
+      try {
+        const r = await fetch(historyUrl(CORE, { limit: 50 })).catch(() => null);
+        const got = r?.ok ? await r.json().catch(() => null) : null;
+        if (!got) return;
+        const before = this.msgs;
+        const now = Date.now();
+        this.msgs = ingestHistory(before, got.entries, { focused: focused()?.terminal ?? null, now });
+        if (this.msgs === before) return;
+        // Each new flight in three steps, each a native transition: placed, flying, landed.
+        // Timers only flip them.
+        for (const f of this.msgs.flights.slice(before.flights.length)) {
+          const key = `${f.from}>${f.to}@${f.at}`;
+          cx.timer.after(40, (cx) => { this.phase.set(key, 1); cx.notify(); });
+          cx.timer.after(420, (cx) => { this.phase.set(key, 2); cx.notify(); });
+          cx.timer.after(FLIGHT_MS + 80, (cx) => {
+            this.phase.delete(key);
+            this.msgs = { ...this.msgs, flights: liveFlights(this.msgs.flights, Date.now()) };
+            cx.notify();
+          });
+        }
+        cx.notify();
+        if (this.historyOpen) this.loadHistory(this.historyOpen, cx);
+      } finally {
+        this.readingMsgs = false;
+      }
+    });
+  }
+
+  // One agent's history for its panel: { items } or { missing } (no ledger yet).
+  loadHistory(address, cx) {
+    cx.spawn(async (cx) => {
+      const r = await fetch(historyUrl(CORE, { terminal: address, limit: 40 })).catch(() => null);
+      const got = r?.ok ? await r.json().catch(() => null) : null;
+      const next = got ? { items: historyItems(got.entries, address) } : { missing: true };
+      if (JSON.stringify(next) === JSON.stringify(this.history.get(address))) return;
+      this.history.set(address, next);
+      cx.notify();
+    });
+  }
+
+  // Opens or closes an agent's history panel (one open at a time).
+  toggleHistory(address, cx) {
+    this.historyOpen = this.historyOpen === address ? null : address;
+    if (this.historyOpen) this.loadHistory(address, cx);
+    cx.notify();
+  }
+
+  // A small history icon, on the hovered row only.
+  historyButton(t, address, hover = this.hovered === address) {
+    const open = this.historyOpen === address;
+    if (!open && !hover) return null;
+    return div().id(`hist-${address}`).flex_none().p(2).rounded(4).cursor_pointer()
+      .text_color(open ? t.accent : t.dim)
+      .hover((s) => s.bg(t.hover).text_color(t.foreground))
+      .tooltip(open ? "Hide history" : "History: its messages and states")
+      .on_click((_e, cx) => { cx.stop_propagation(); this.toggleHistory(address, cx); })
+      .child(svg("mods/agents-tree/history.svg").size(12));
+  }
+
+  // The history below a row: quiet chat bubbles, oldest first, state changes as thin lines.
+  historyPanel(t, address) {
+    const h = this.history.get(address);
+    const quiet = (text) => div().text_size(10.5).text_color(t.dim).child(text);
+    const body = !h ? [quiet("Loading…")] : h.missing ? [quiet("No history yet")] : !h.items.length ? [quiet("No messages yet")]
+      : h.items.map((i) => (i.kind === "state"
+        ? div().id(`hi-${i.id}`).flex_none().text_size(10).text_color(t.dim).text_center().child(i.text)
+        : v_flex().id(`hi-${i.id}`).flex_none().max_w(230).gap(1).px(7).py(4).rounded(8)
+          .when(i.mine, (el) => el.self_end().bg(t.selected))
+          .when(!i.mine, (el) => el.self_start().border_1().border_color(t.border))
+          .child(div().text_size(10).text_color(t.dim).child(`${i.mine ? `to ${i.to}` : i.who} · ${i.time}`))
+          .child(div().text_size(11.5).text_color(t.foreground).whitespace_normal()
+            .child(i.text.length > 280 ? `${i.text.slice(0, 280)}…` : i.text))));
+    return v_flex().id(`history-${address}`).ml(24).mr(6).mb(4).p(6).gap(5).rounded(8).bg(t.hover).children(body);
+  }
+
+  // A row with its history panel below it when open.
+  withHistory(t, address, el) {
+    return this.historyOpen === address ? v_flex().flex_none().child(el).child(this.historyPanel(t, address)) : el;
+  }
+
+  // What the flights in the air draw on a row, as layers under its content: the sender's paw
+  // sliding out to the right, a paw lit in turn on each row between, the receiver's glow.
+  flightLayers(t, address) {
+    return (this.flying?.get(address) ?? []).map((m) => {
+      const phase = this.phase.get(m.key) ?? 0;
+      const id = `fl-${m.kind}-${address}-${m.key}`;
+      if (m.kind === "in") return div().id(id).absolute().inset_0().rounded(8).bg(t.accent).loop("opacity", { from: 0, to: 0.16, period: 700 });
+      if (m.kind === "out") return svg("mods/agents-tree/paw.svg").id(id).absolute().top(10).size(10).text_color(t.accent)
+        .left(phase ? 70 : 26).opacity(phase ? 0 : 0.9)
+        .transition("left", { duration: 800, easing: "ease-out" }).transition("opacity", { duration: 800, easing: "ease-in" });
+      return svg("mods/agents-tree/paw.svg").id(id).absolute().top(11).left(1).size(8).text_color(t.accent)
+        .opacity(phase === 1 ? 0.85 : 0).transition("opacity", { duration: 160, delay: m.i * 70 });
+    });
+  }
+
+  // A receiver's dot: who wrote and the first words; it stays until focused or answered.
+  messageDot(t, address) {
+    const dot = this.msgs.dots[address];
+    if (!dot) return null;
+    return div().id(`msg-${address}`).flex_none().p(3).cursor_pointer().tooltip(dotTip(dot))
+      .on_click((_e, cx) => { cx.stop_propagation(); this.toggleHistory(address, cx); })
+      .child(div().size(6).rounded_full().bg(t.accent));
   }
 
   // Keep offline pins until their terminal returns, and keep each pending until
@@ -638,7 +756,10 @@ export default class Agents extends View {
     const hover = this.hovered === key;
     const ago = look.asleep && lead.since > 1e12 ? duration(now - lead.since) : "";
     const waking = look.asleep && this.waking === lead.name;
-    return h_flex().id(key).px(8).h(30).flex_none().rounded(8).items_center().gap(7).cursor_pointer()
+    const dot = live ? this.messageDot(t, live.address) : null;
+    const history = live ? this.historyButton(t, live.address, hover) : null;
+    const el = h_flex().id(key).relative().children(live ? this.flightLayers(t, live.address) : [])
+      .px(8).h(30).flex_none().rounded(8).items_center().gap(7).cursor_pointer()
       .hover((s) => s.bg(t.hover))
       .on_hover((on, cx) => {
         if (on) this.hovered = key;
@@ -652,6 +773,7 @@ export default class Agents extends View {
       .child(div().min_w(0).flex_shrink(1).truncate().text_color(look.dim ? t.dim : idle ? t.muted : t.foreground).child(look.name))
       .when(Boolean(look.tag), (el) => el.child(placeChip(t, `${key}-main`, look.tag)))
       .when(Boolean(mark), (el) => el.child(mark))
+      .when(Boolean(dot), (el) => el.child(dot))
       .child(h_flex().flex_1().min_w(0).gap(6).items_center().text_size(11).overflow_hidden()
         .children(facts.map((f) => (f.kind === "github"
           ? svg("mods/agents-tree/github.svg").id(`${key}-gh`).size(11).flex_none().text_color(t.dim).tooltip(f.tip)
@@ -660,10 +782,12 @@ export default class Agents extends View {
       .when(Boolean(badge), (el) => el.child(badge))
       .when(Boolean(eta), (el) => el.child(this.sleepTag(t, `eta-${live?.address}`, eta, "Auto-sleep puts it to sleep then: its summary goes to Engram and its terminal ends")))
       .when(count > 0, (el) => el.child(this.nodeFold(t, key, count, top)))
+      .when(Boolean(history), (el) => el.child(history))
       .when(Boolean(live), (el) => el.child(this.status(t, live, true)))
       .when(waking, (el) => el.child(div().flex_none().text_size(11).text_color(t.accent).frames(["waking", "waking.", "waking..", "waking..."], 300)))
       .when(look.asleep && !waking && hover, (el) => el.child(this.wakeButton(t, lead)))
       .when(look.asleep && !waking && !hover && Boolean(ago), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(ago)));
+    return live ? this.withHistory(t, live.address, el) : el;
   }
 
   // An agent's live processes, unfolded: name, CPU and memory, on tree lines.
@@ -710,6 +834,7 @@ export default class Agents extends View {
     const shown = focused()?.agent;
     const now = Date.now();
     this.track(list, now);
+    this.msgs = clearDots(this.msgs, { focused: focused()?.terminal ?? null, live: list.length ? new Set(list.map((a) => a.address)) : null });
     const termOf = (a) => all.find((x) => x.address === a.address);
     const nameOf = (a) => termOf(a)?.name;
     const cwdOf = (a) => termOf(a)?.cwd ?? a.cwd;
@@ -754,6 +879,18 @@ export default class Agents extends View {
     const markOf = (a) => roleIcon(t, `role-${a.address}`, roles.get(a.address), orchOf(a.name) ?? null);
     setAgentOrder(order.map((a) => a.address));
     if (collapsed) list = order;
+    // Rows the flights in the air animate: sender, the rows between (top to bottom), receiver.
+    this.flying = new Map();
+    const rowOrder = order.map((a) => a.address);
+    for (const f of collapsed ? [] : liveFlights(this.msgs.flights, now)) {
+      const r = flightRows(rowOrder, f);
+      if (!r) continue;
+      const key = `${f.from}>${f.to}@${f.at}`;
+      const add = (addr, m) => addr && this.flying.set(addr, [...(this.flying.get(addr) ?? []), { ...m, key }]);
+      add(r.sender, { kind: "out" });
+      r.between.forEach((x, i) => add(x, { kind: "hop", i: i + 1 }));
+      add(r.receiver, { kind: "in" });
+    }
 
     const withKids = (a, i, skip = null, grouped = false) => {
       const subs = collapsed ? [] : this.tree(all, a.address, [], skip);
@@ -863,8 +1000,12 @@ export default class Agents extends View {
       const procs = this.procChip(t, a);
       const mark = isPinned ? null : markOf(a);
       const helpers = badgeOf(a);
-      return h_flex()
+      const dot = this.messageDot(t, a.address);
+      const history = this.historyButton(t, a.address);
+      return this.withHistory(t, a.address, h_flex()
         .id(`ag-${a.address}`)
+        .relative()
+        .children(this.flightLayers(t, a.address))
         .px(8)
         .h(30)
         .flex_none()
@@ -894,14 +1035,16 @@ export default class Agents extends View {
             .tooltip(`Runs at the ${root} root (~/mac-workspace/${root})`)
             .child(svg("mods/workspace-chrome/folder.svg").size(10).flex_none()).child(`${root} root`)))
           .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`· ${more}`))))
+        .when(Boolean(dot), el => el.child(dot))
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
         .when(Boolean(procs), el => el.child(procs))
         .when(Boolean(helpers), el => el.child(helpers))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
+        .when(Boolean(history), el => el.child(history))
         .when(this.hovered === a.address, el => el.child(pin))
         .when(Boolean(eta), el => el.child(this.sleepTag(t, `eta-${a.address}`, eta, "Auto-sleep puts it to sleep then: its summary goes to Engram and its terminal ends")))
         .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
-        .child(this.status(t, a, true));
+        .child(this.status(t, a, true)));
     };
 
     // A seat that isn't running: "<Org> orchestrator · off", muted; Other has no orchestrator.
