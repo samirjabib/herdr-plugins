@@ -195,7 +195,8 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
   The name shows in the prompt box, `/resume` and Remote Control on the phone,
   and a switch's restart renames it after the new account. A session renamed
   with `/rename` keeps that name when it's resumed, a switch's restart
-  included (the launcher reads the transcript's last custom title). A bare
+  included (the launcher reads the transcript's last custom title);
+  `-c`/`--continue` and a `--resume` without an id get no name at all. A bare
   `--remote-control` gets the session's name, so the Claude app on the
   desktop and the phone shows the same one. A name given by hand
   (`-n`/`--name`, or after `--remote-control`) or a print run (`-p`) is left alone.
@@ -276,7 +277,11 @@ scripts/install.sh claude-accounts
   `[ -n "$HC_TERMINAL_ID" ] && PATH="$HOME/.config/herdr-app/mods/claude-accounts/bin:$PATH"`.
   It uses `CLAUDE_ACCOUNTS_DIR` when set (even empty), else the first line of
   `active`, sets or unsets `CLAUDE_CONFIG_DIR`, and runs the next `claude` on
-  the PATH. Outside Herdr it changes nothing. It is not linked into
+  the PATH. When that next `claude` is an account-aware wrapper (a script that
+  reads `CLAUDE_ACCOUNTS_DIR`, such as mac-workspace's `bin/shims/claude`,
+  which keeps each org on its own accounts), it hands the pick on as
+  `CLAUDE_ACCOUNTS_DIR` and lets the wrapper choose, and the session name
+  leaves the account out. Outside Herdr it changes nothing. It is not linked into
   `~/.local/bin`: that `claude` is Claude Code's own. Without it every
   restart ends as "landed elsewhere" and new Claudes stay on System default.
 - Live numbers between polls need the statusline drop in

@@ -19,7 +19,9 @@ async function sandbox(t, { active } = {}) {
   const realBin = join(dir, "real-bin");
   await mkdir(realBin);
   const fake = join(realBin, "claude");
-  await writeFile(fake, '#!/bin/sh\nprintf "dir=%s\\n" "${CLAUDE_CONFIG_DIR-<unset>}"\nprintf "accounts=%s\\n" "${CLAUDE_ACCOUNTS_DIR-<unset>}"\nfor a in "$@"; do printf "arg=%s\\n" "$a"; done\n');
+  // It prints CLAUDE_ACCOUNTS_DIR without spelling the name, so the launcher
+  // takes it for Claude Code itself, not for an account-aware wrapper.
+  await writeFile(fake, '#!/bin/sh\nprintf "dir=%s\\n" "${CLAUDE_CONFIG_DIR-<unset>}"\nk=ACCOUNTS; eval "v=\\${CLAUDE_${k}_DIR-<unset>}"; printf "accounts=%s\\n" "$v"\nfor a in "$@"; do printf "arg=%s\\n" "$a"; done\n');
   await chmod(fake, 0o755);
   if (active !== undefined) {
     const state = join(dir, ".config/herdr-app/claude-accounts");
@@ -201,4 +203,45 @@ test("a backslash in a folder name is kept as is", async (t) => {
   const s = await sandbox(t, { active: "/profiles/a/home\n" });
   const cwd = await workspace(s, "ag/a\\nb/main");
   assert.equal(named(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, cwd)), "mini · a\\nb · main · dev");
+});
+
+// An account-aware wrapper next on the PATH (like mac-workspace's claude shim,
+// which keeps each org on its own accounts).
+async function wrapperBin(s) {
+  const bin = join(s.home, "wrapper-bin");
+  await mkdir(bin);
+  await writeFile(join(bin, "claude"), '#!/bin/sh\n# reads CLAUDE_ACCOUNTS_DIR\nprintf "dir=%s\\n" "${CLAUDE_CONFIG_DIR-<unset>}"\nprintf "accounts=%s\\n" "${CLAUDE_ACCOUNTS_DIR-<unset>}"\nfor a in "$@"; do printf "arg=%s\\n" "$a"; done\n');
+  await chmod(join(bin, "claude"), 0o755);
+  return `${LAUNCHER_DIR}:${bin}:${s.realBin}:/usr/bin:/bin`;
+}
+
+test("an account-aware wrapper next on the PATH gets the pick as CLAUDE_ACCOUNTS_DIR; CLAUDE_CONFIG_DIR is left alone", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/a/home\n" });
+  const path = await wrapperBin(s);
+  const fromActive = run(s, { HC_TERMINAL_ID: "t1", CLAUDE_CONFIG_DIR: "/mine" }, [], path);
+  assert.equal(fromActive.code, 0, fromActive.err);
+  assert.match(fromActive.out, /^dir=\/mine$/m);
+  assert.match(fromActive.out, /^accounts=\/profiles\/a\/home$/m);
+  const fromSwitch = run(s, { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_DIR: "/profiles/b/home" }, [], path);
+  assert.match(fromSwitch.out, /^dir=<unset>$/m);
+  assert.match(fromSwitch.out, /^accounts=\/profiles\/b\/home$/m);
+  // The session name leaves the account out: the wrapper picks it.
+  const cwd = await workspace(s, "ag/shop-app/main");
+  assert.equal(named(run(s, { HC_TERMINAL_ID: "t1", CLAUDE_CONFIG_DIR: "/profiles/b/home" }, [], path, cwd)), "mini · shop-app · main");
+});
+
+test("--continue and a resume that names no session keep their /rename name: no name is added", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/a/home\n" });
+  const cwd = await workspace(s, "ag/shop-app/main");
+  for (const args of [["-c"], ["--continue"], ["--resume"], ["-r"], ["--resume", "--remote-control"]]) {
+    assert.deepEqual(argsOf(run(s, { HC_TERMINAL_ID: "t1" }, args, undefined, cwd)), args);
+  }
+});
+
+test("CLAUDE_ACCOUNTS_HOME moves the state folder the launcher reads", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/a/home\n" });
+  const moved = join(s.home, "moved");
+  await mkdir(moved);
+  await writeFile(join(moved, "active"), "/profiles/c/home\n");
+  assert.match(run(s, { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_HOME: moved }).out, /^dir=\/profiles\/c\/home$/m);
 });
