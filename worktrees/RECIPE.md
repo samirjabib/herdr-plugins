@@ -25,6 +25,10 @@ go to sleep and come back where they were.
   it has slept. Hover: its recap's first lines and a **Wake** button
   (`ws agent wake <name>`), which resumes the same conversation in its tab. A
   sleeper whose terminal is live again shows as its agent row.
+  Quick tags, in the accent: `asleep` on each sleeper, `zzz N` on a project or org
+  holding N sleepers, and `zzz 12m` (`zzz soon` in its last minute) on an idle
+  agent: when auto-sleep will take it (the core's `sleepAtMs`; orchestrators and
+  your own sessions never get one).
 - **The tab bar by level** (`tabs-level`, a copy of Herdr's `tabs`). It shows only
   the tabs on the active tab's level: the same checkout (`<project>/main` or one
   worktree) or, for an orchestrator, the same org root (`~/mac-workspace/<org>`).

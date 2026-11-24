@@ -359,3 +359,30 @@ export function sleepTip(s, ago) {
   const recap = (s.recap ?? "").split("\n").map((l) => l.trim()).filter((l) => l && !/^RECAP-/.test(l)).slice(0, 4);
   return [`Asleep${ago ? ` ${ago}` : ""} · summary saved in Engram`, ...recap, "Wake resumes it: same conversation, same tab"].join("\n");
 }
+
+// terminal -> when auto-sleep will put it to sleep (epoch ms), from the core's /api/agents
+// (sleepAtMs; absent: it never will, or an older core).
+export function sleepEtas(list) {
+  const out = new Map();
+  for (const a of Array.isArray(list) ? list : []) {
+    if (a && !a.sleeping && a.terminal && Number.isFinite(a.sleepAtMs)) out.set(a.terminal, a.sleepAtMs);
+  }
+  return out;
+}
+
+// An idle agent's tag: "zzz 12m" until auto-sleep takes it, "zzz soon" in its last minute
+// (Collie says "sleeps in 12m"). Null when it never sleeps.
+export function sleepsIn(at, now) {
+  if (!Number.isFinite(at)) return null;
+  const left = at - now;
+  if (left <= 60_000) return "zzz soon";
+  const m = Math.floor(left / 60_000);
+  return `zzz ${m < 60 ? `${m}m` : `${Math.floor(m / 60)}h`}`;
+}
+
+// How many sleeping agents a project, or an org seat (its projects and loose rows), holds.
+export function asleepIn(node) {
+  const own = (list) => (list ?? []).filter((x) => x?.sleeping).length;
+  if (node?.projects) return node.projects.reduce((n, p) => n + own(p.background), 0) + own(node.loose);
+  return own(node?.background);
+}

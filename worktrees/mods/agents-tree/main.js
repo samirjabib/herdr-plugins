@@ -7,7 +7,7 @@ import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, hc, readTextFile, checking } from "herdr";
 import * as fs from "fs/promises";
-import { placeOf, orchOf, orgRootOf, isJob, buildTree, headBranch, hasGithub, projectSummary, parsePs, processTree, plumbingNote, procTotal, formatMem, bgState, bgLabel, bgVisible, sleepersOf, sleepTip, jobInfo } from "./model.js";
+import { placeOf, orchOf, orgRootOf, isJob, buildTree, headBranch, hasGithub, projectSummary, parsePs, processTree, plumbingNote, procTotal, formatMem, bgState, bgLabel, bgVisible, sleepersOf, sleepTip, sleepEtas, sleepsIn, asleepIn, jobInfo } from "./model.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -145,7 +145,10 @@ export default class Agents extends View {
         const r = await fetch(`${CORE}/api/agents`);
         if (!r.ok) return;
         const got = await r.json();
-        const next = sleepersOf(Array.isArray(got) ? got : got?.agents);
+        const rows = Array.isArray(got) ? got : got?.agents;
+        const etas = sleepEtas(rows);
+        if (JSON.stringify([...etas]) !== JSON.stringify([...(this.etas ?? [])])) { this.etas = etas; cx.notify(); }
+        const next = sleepersOf(rows);
         if (JSON.stringify(next) !== JSON.stringify(this.sleepers)) { this.sleepers = next; cx.notify(); }
       } catch {} // core down: keep the last list
     };
@@ -406,6 +409,12 @@ export default class Agents extends View {
       .when(l === "└" || l === "├", el => el.border_b(1.5).rounded_bl(6)));
   }
 
+  // A quiet sleep tag: "asleep", "zzz 2" on a project or org, "zzz 4m" on an idle agent.
+  sleepTag(t, id, text, tip) {
+    return div().id(id).flex_none().px(5).h(16).rounded(4).flex().items_center().text_size(10.5)
+      .bg(t.accent + "1a").text_color(t.accent).tooltip(tip).child(text);
+  }
+
   // A sleeping agent: the Claude icon dimmed with a zzz floating over it, its task in grey and
   // how long it has slept. Hover: its recap, and a Wake button (ws agent wake), which resumes
   // the same conversation in its tab.
@@ -443,6 +452,7 @@ export default class Agents extends View {
       .tooltip(sleepTip(s, ago))
       .child(icon)
       .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(s.title))
+      .when(!waking, (el) => el.child(this.sleepTag(t, `${key}-tag`, "asleep", "Asleep: its summary is saved in Engram and its terminal ended, so it uses no CPU or memory")))
       .when(waking, (el) => el.child(div().flex_none().text_size(11).text_color(t.accent).frames(["waking", "waking.", "waking..", "waking..."], 300)))
       .when(!waking && this.hovered === key, (el) => el.child(wake))
       .when(!waking && this.hovered !== key && Boolean(ago), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(ago)));
@@ -590,6 +600,7 @@ export default class Agents extends View {
         .children(facts.map((f) => (f.kind === "github"
           ? svg("mods/agents-tree/github.svg").id(`${key}-gh`).size(11).flex_none().text_color(t.dim).tooltip(f.tip)
           : div().id(`${key}-${f.kind}`).flex_none().text_color(f.warn ? t.ansi1 : t.dim).tooltip(f.tip).child(f.text)))))
+      .when(asleepIn(p) > 0, (el) => el.child(this.sleepTag(t, `${key}-zzz`, `zzz ${asleepIn(p)}`, `${asleepIn(p)} agent${asleepIn(p) === 1 ? "" : "s"} asleep in ${p.name}`)))
       .when(kids.length > 0, (el) => el.child(this.nodeFold(t, key, kids.length, top)))
       .when(Boolean(p.orch), (el) => el.child(this.status(t, { status: statusOf(p.orch) }, true)));
   }
@@ -757,6 +768,7 @@ export default class Agents extends View {
       }
       const when = this.since(a);
       const idle = a.status === "idle" && !a.focused;
+      const eta = a.status === "working" || a.status === "blocked" ? null : sleepsIn(this.etas?.get(a.address), now);
       const isPinned = a.pinned;
       const pin = div()
         .id(`pin-${a.address}`)
@@ -818,6 +830,7 @@ export default class Agents extends View {
         .when(Boolean(procs), el => el.child(procs))
         .when(subs.length > 0, el => el.child(fold(a, subs)))
         .when(this.hovered === a.address, el => el.child(pin))
+        .when(Boolean(eta), el => el.child(this.sleepTag(t, `eta-${a.address}`, eta, "Auto-sleep puts it to sleep then: its summary goes to Engram and its terminal ends")))
         .when(this.hovered !== a.address && Boolean(when), el => el.child(div().flex_none().text_size(11).text_color(t.dim).child(duration(now - when))))
         .child(this.status(t, a, true));
     };
@@ -847,7 +860,10 @@ export default class Agents extends View {
       const top = [...s.projects.flatMap((p) => p.workers), ...s.loose].reduce((m, a) => ((RANK[a.status] ?? 0) > (RANK[m] ?? 0) ? a.status : m), null);
       if (!count) return head;
       const [first, ...rest] = head;
-      const headRow = h_flex().id(`${key}-head`).items_center().child(div().flex_1().min_w(0).child(first)).child(this.nodeFold(t, key, count, top));
+      const zzz = asleepIn(s);
+      const headRow = h_flex().id(`${key}-head`).items_center().child(div().flex_1().min_w(0).child(first))
+        .when(zzz > 0, (el) => el.child(this.sleepTag(t, `${key}-zzz`, `zzz ${zzz}`, `${zzz} agent${zzz === 1 ? "" : "s"} asleep in ${ORG_LABEL[s.org] ?? s.org}`)))
+        .child(this.nodeFold(t, key, count, top));
       if (this.folded.has(key)) return [headRow, ...rest];
       // A project's agents by checkout: a "main" header, then one per worktree, each with its
       // agents and background terminals under it.

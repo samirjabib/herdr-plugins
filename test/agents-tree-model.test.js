@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import {
   projectOf, projectOrchOf, buildTree, headBranch, hasGithub, projectSummary,
   parsePs, shortCmd, processRows, formatMem, processTree, plumbingNote, procTotal,
-  bgState, bgLabel, bgVisible, jobInfo, placeOf, orgRootOf, sleepersOf, sleepTip,
+  bgState, bgLabel, bgVisible, jobInfo, placeOf, orgRootOf, sleepersOf, sleepTip, sleepEtas, sleepsIn, asleepIn,
 } from "../worktrees/mods/agents-tree/model.js";
 
 const R = "/Users/me/mac-workspace";
@@ -311,4 +311,31 @@ test("sleepTip says how long, the recap's first lines, and that a click wakes it
   const tip = sleepTip({ recap: "RECAP-BEGIN ab\nGoal: ship\nDone: a\nNext: b\nOpen questions: none\nmore\nRECAP-END ab" }, "1h");
   assert.equal(tip, "Asleep 1h · summary saved in Engram\nGoal: ship\nDone: a\nNext: b\nOpen questions: none\nWake resumes it: same conversation, same tab");
   assert.equal(sleepTip({ recap: null }, ""), "Asleep · summary saved in Engram\nWake resumes it: same conversation, same tab");
+});
+
+test("sleepEtas maps each live agent's terminal to when auto-sleep takes it", () => {
+  const got = sleepEtas([
+    { terminal: "t1", sleepAtMs: 900 }, { terminal: "t2", sleepAtMs: null },
+    { terminal: "t3" }, { terminal: "t4", sleeping: true, sleepAtMs: 5 },
+  ]);
+  assert.deepEqual([...got], [["t1", 900]]);
+  assert.deepEqual([...sleepEtas(null)], []);
+});
+
+test("sleepsIn tags an idle agent with the time left, soon in its last minute, nothing when it never sleeps", () => {
+  const now = 1_000_000_000;
+  assert.equal(sleepsIn(now + 12 * 60_000 + 5000, now), "zzz 12m");
+  assert.equal(sleepsIn(now + 2 * 3_600_000, now), "zzz 2h");
+  assert.equal(sleepsIn(now + 30_000, now), "zzz soon");
+  assert.equal(sleepsIn(now - 5000, now), "zzz soon");
+  assert.equal(sleepsIn(undefined, now), null);
+});
+
+test("asleepIn counts the sleepers of a project and of an org seat", () => {
+  const sleeper = { sleeping: true }, bg = { name: "npm" };
+  const p1 = { background: [sleeper, bg, sleeper] }, p2 = { background: [bg] };
+  assert.equal(asleepIn(p1), 2);
+  assert.equal(asleepIn(p2), 0);
+  assert.equal(asleepIn({ projects: [p1, p2], loose: [sleeper] }), 3);
+  assert.equal(asleepIn(null), 0);
 });
