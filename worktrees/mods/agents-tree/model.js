@@ -53,7 +53,7 @@ const byUrgency = (x, y) => y.rank - x.rank || y.since - x.since || y.seq - x.se
 
 // The tree. `list`: agents in the list's order, each { address, name, cwd, rank, since, seq,
 // pinned, space }. Returns { boss, pinned, jobs, root, seats: [{ org, orch, projects, loose }] }:
-// `root` the agents and background terminals at the workspace root (the Boss's own); each
+// `root` the agents and background terminals at the workspace root: the Boss's helpers, shown at its level; each
 // project { org, name, base, orch, workers, checkouts, rank, since }, `checkouts` its workers
 // and background terminals by checkout ({ place, workers, background }: "main" first, then each
 // worktree as first met), `loose` the org's agents outside a

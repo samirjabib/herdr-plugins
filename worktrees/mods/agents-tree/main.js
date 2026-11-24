@@ -889,9 +889,10 @@ export default class Agents extends View {
         ...tree.pinned.flatMap((a) => withKids(a, 0))] : []),
       // The Workspace Boss gives the orders: the org orchestrators hang under it, with tree lines.
       ...(tree.boss ? withKids(tree.boss, 0, listedAgents) : [offRow("workspace")]),
-      ...this.branches(t, "seat-branch", [jobsGroup("boss-jobs", tree.jobs),
-        // Agents at the workspace root are the Boss's own helpers, above the org seats.
-        ...tree.root.map((a) => (this.listed.has(a.address) ? withKids(a, 0) : extraEls(a))), ...tree.seats.map(seatEls)]),
+      ...this.branches(t, "seat-branch", [jobsGroup("boss-jobs", tree.jobs), ...tree.seats.map(seatEls)]),
+      // The Boss's helpers (other Claudes at the workspace root, often panes of its tab) are its
+      // peers, not its reports: they sit at the Boss's level, after its tree, so the org lines stay whole.
+      ...tree.root.flatMap((a) => (this.listed.has(a.address) ? withKids(a, 0) : extraEls(a))),
     ];
 
     return v_flex()
