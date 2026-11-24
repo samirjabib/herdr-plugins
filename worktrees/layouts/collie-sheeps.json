@@ -187,16 +187,6 @@
                   "view": "status"
                 }
               }
-            },
-            {
-              "id": "status-agent-sleep",
-              "type": "block",
-              "size": {
-                "px": 40
-              },
-              "content": {
-                "mod": "agent-sleep"
-              }
             }
           ]
         }
