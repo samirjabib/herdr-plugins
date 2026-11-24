@@ -7,7 +7,7 @@ import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, hc, readTextFile, checking } from "herdr";
 import * as fs from "fs/promises";
-import { placeOf, orchOf, orgRootOf, isJob, buildTree, headBranch, hasGithub, projectSummary, parsePs, processTree, plumbingNote, procTotal, formatMem, bgState, bgLabel, bgVisible, sleepersOf, sleepTip, sleepEtas, sleepsIn, asleepIn, jobInfo } from "./model.js";
+import { helperLabels, placeOf, orchOf, orgRootOf, isJob, buildTree, headBranch, hasGithub, projectSummary, parsePs, processTree, plumbingNote, procTotal, formatMem, bgState, bgLabel, bgVisible, sleepersOf, sleepTip, sleepEtas, sleepsIn, asleepIn, jobInfo } from "./model.js";
 
 function find(node, id) {
   if (node?.id === id) return node;
@@ -733,6 +733,8 @@ export default class Agents extends View {
       const many = tabCounts.get(a.tab) > 1;
       return [a.address, tab ? title(many ? { ...tab, named: false } : tab, many ? a : leads.get(a.tab)) : (a.title || a.program?.name || "")];
     }));
+    // The Boss's helpers never read as a second Boss.
+    if (tree.boss) for (const [k, v] of helperLabels(tree.root.map((a) => a.address), labels.get(tree.boss.address), (k) => labels.get(k))) labels.set(k, v);
     const label = (a) => labels.get(a.address);
     const detail = new Map(list.map(a => [a.address, /^\d+$/.test(label(a)) ? null : label(a)]));
     const seen = {};
@@ -821,8 +823,8 @@ export default class Agents extends View {
             .child(svg("mods/workspace-chrome/git-branch.svg").size(10).flex_none()).child(where)))
           .when(Boolean(root), el => el.child(h_flex().flex_none().gap(3).px(5).h(16).rounded(4).items_center().text_size(10.5)
             .bg((t.warning ?? t.blocked) + "1f").text_color(t.warning ?? t.blocked)
-            .tooltip(root === "workspace" ? "Runs at the workspace root (~/mac-workspace)" : `Runs at the ${root} root (~/mac-workspace/${root})`)
-            .child(svg("mods/workspace-chrome/folder.svg").size(10).flex_none()).child(root === "workspace" ? "root" : `${root} root`)))
+            .tooltip(root === "workspace" ? "A helper of the Workspace Boss: another Claude at the workspace root (~/mac-workspace)" : `Runs at the ${root} root (~/mac-workspace/${root})`)
+            .child(svg("mods/workspace-chrome/folder.svg").size(10).flex_none()).child(root === "workspace" ? "helper" : `${root} root`)))
           .when(full && Boolean(more), el => el.child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(`· ${more}`))))
         .when(Boolean(machine), el => el.child(div().text_size(10).text_color(t.dim).child(machine)))
         .when(Boolean(procs), el => el.child(procs))

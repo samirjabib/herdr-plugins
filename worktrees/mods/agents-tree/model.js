@@ -391,3 +391,11 @@ export function asleepIn(node) {
   if (node?.projects) return node.projects.reduce((n, p) => n + own(p.background), 0) + own(node.loose);
   return own(node?.background);
 }
+
+// The names of the Boss's helpers (agents at the workspace root): one whose name copies the
+// Boss's (a pane of the Boss's tab reads the tab's title) or has none becomes "Helper", numbered
+// in order when there are several. Returns Map(address -> name) for the ones renamed.
+export function helperLabels(addresses, bossLabel, labelOf) {
+  const plain = addresses.filter((k) => !labelOf(k) || labelOf(k) === bossLabel);
+  return new Map(plain.map((k, i) => [k, plain.length > 1 ? `Helper ${i + 1}` : "Helper"]));
+}

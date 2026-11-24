@@ -3,6 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  helperLabels,
   projectOf, projectOrchOf, buildTree, headBranch, hasGithub, projectSummary,
   parsePs, shortCmd, processRows, formatMem, processTree, plumbingNote, procTotal,
   bgState, bgLabel, bgVisible, jobInfo, placeOf, orgRootOf, sleepersOf, sleepTip, sleepEtas, sleepsIn, asleepIn,
@@ -352,4 +353,12 @@ test("an agent at the workspace root sits under the Boss, not in Other; Other ke
   // With nothing outside the workspace, Other is hidden.
   const quiet = buildTree([ag("t1", R, { name: "orch-workspace" }), ag("t2", R)]);
   assert.equal(quiet.seats.some((s) => s.org === "other"), false);
+});
+
+test("helpers at the workspace root never read as a second Workspace Boss: a copied or empty name becomes Helper, numbered when there are several", () => {
+  const names = { h1: "Workspace Boss", h2: "Engram cloud", h3: "", h4: "Workspace Boss" };
+  const got = helperLabels(["h1", "h2", "h3", "h4"], "Workspace Boss", (k) => names[k]);
+  assert.deepEqual([...got], [["h1", "Helper 1"], ["h3", "Helper 2"], ["h4", "Helper 3"]]);
+  const one = helperLabels(["h1", "h2"], "Workspace Boss", (k) => names[k]);
+  assert.deepEqual([...one], [["h1", "Helper"]]);
 });
