@@ -187,6 +187,13 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
 - **Which account a terminal runs.** Inside Herdr, the `claude` launcher
   starts each new Claude on the active account. A running terminal's
   account is the config folder holding its live session file.
+- **A group pinned to an account.** `group-accounts` in the state folder pins
+  a mac-workspace group to one account: one `<group><TAB><config dir>` line
+  per group (`#` lines and blank lines are skipped), e.g.
+  `cs	/Users/me/.claude-profiles/cs`. Inside Herdr, a Claude started anywhere
+  under `~/mac-workspace/<group>/` runs on that folder, over the active
+  account and a switch's restart, so that group never lands on another
+  account. A pin to a folder that does not exist is ignored.
 - **Session names.** In a mac-workspace checkout (`~/mac-workspace/<group>/<project>/main`
   or `.../worktrees/<worktree>`), the launcher names the session
   `<Mac> · <project> · <worktree or main> · <account>`, e.g.
@@ -275,7 +282,8 @@ scripts/install.sh claude-accounts
   `claude` launcher, `mods/claude-accounts/bin/claude`. Put its installed
   folder first on the PATH inside Herdr, for example in `~/.zshrc`:
   `[ -n "$HC_TERMINAL_ID" ] && PATH="$HOME/.config/herdr-app/mods/claude-accounts/bin:$PATH"`.
-  It uses `CLAUDE_ACCOUNTS_DIR` when set (even empty), else the first line of
+  It uses the folder `group-accounts` pins to the checkout's group, else
+  `CLAUDE_ACCOUNTS_DIR` when set (even empty), else the first line of
   `active`, sets or unsets `CLAUDE_CONFIG_DIR`, and runs the next `claude` on
   the PATH. When that next `claude` is an account-aware wrapper (a script that
   reads `CLAUDE_ACCOUNTS_DIR`, such as mac-workspace's `bin/shims/claude`,

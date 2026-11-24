@@ -3,6 +3,11 @@
 # the shell then runs this instead of Claude Code, and this runs Claude Code.
 #
 # Inside Herdr ($HC_TERMINAL_ID set) it picks the account's config folder:
+#   0. the folder group-accounts pins to this checkout's mac-workspace group
+#      (`<group><TAB><config dir>` lines in the state folder's group-accounts
+#      file, e.g. cs -> the Coldsmoke login), so that group never runs on
+#      another account, not even after a switch's restart; a pin to a folder
+#      that does not exist is ignored;
 #   1. CLAUDE_ACCOUNTS_DIR when set, even empty: the line a switch's restart
 #      types (`CLAUDE_ACCOUNTS_DIR=<folder> claude ... --resume <id>`);
 #   2. else the first line of ~/.config/herdr-app/claude-accounts/active;
@@ -47,10 +52,35 @@ if [ "$(head -c 2 "$next" 2>/dev/null)" = "#!" ] && grep -q CLAUDE_ACCOUNTS_DIR 
   wrapper=1
 fi
 
+# The config folder group-accounts pins to the mac-workspace group of the
+# current folder (its first component under ~/mac-workspace), if any.
+group_account() {
+  map="$state/group-accounts"
+  [ -r "$map" ] || return 1
+  ws=$(cd "$HOME/mac-workspace" 2>/dev/null && pwd -P) || return 1
+  here=$(pwd -P 2>/dev/null) || return 1
+  case $here/ in "$ws"/*/*) ;; *) return 1 ;; esac
+  group=${here#"$ws"/}
+  group=${group%%/*}
+  tab=$(printf '\t')
+  while IFS= read -r line || [ -n "$line" ]; do
+    case $line in "#"*|"") continue ;; esac
+    [ "${line%%"$tab"*}" = "$group" ] || continue
+    folder=${line#*"$tab"}
+    [ -n "$folder" ] && [ "$folder" != "$line" ] && [ -d "$folder" ] || return 1
+    printf '%s\n' "$folder"
+    return 0
+  done < "$map"
+  return 1
+}
+
 if [ -n "${HC_TERMINAL_ID:-}" ]; then
   active="$state/active"
   pick=0
-  if [ "${CLAUDE_ACCOUNTS_DIR+set}" = set ]; then
+  if pinned=$(group_account); then
+    dir=$pinned
+    pick=1
+  elif [ "${CLAUDE_ACCOUNTS_DIR+set}" = set ]; then
     dir=$CLAUDE_ACCOUNTS_DIR
     pick=1
   elif [ -r "$active" ]; then
