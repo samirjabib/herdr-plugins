@@ -18,6 +18,14 @@ go to sleep and come back where they were.
   soft gold `★` when it is on main (where to update and make worktrees from),
   a red `⚠` when it is on another branch. The split buttons open the new
   terminal in that pane's folder, not the focused pane's.
+- **The tab bar by level** (`tabs-level`, a copy of Herdr's `tabs`). It shows only
+  the tabs on the active tab's level: the same checkout (`<project>/main` or one
+  worktree) or, for an orchestrator, the same org root (`~/mac-workspace/<org>`).
+  A tab's level is where its agent runs (else its first terminal). So an org
+  orchestrator's bar holds the org's own tabs, not every worker's, and a
+  worktree's bar holds the agents and terminals open there (open more with `+`
+  to run several on the same branch). The wheel cycles those tabs only. A tab
+  outside mac-workspace shows every tab of the space.
 - **The Spaces sidebar** (`spaces-ws`). Only the header (the "Spaces" title,
   Collie's link and `+`) and Collie's workspace switcher: the list of spaces
   left the wide sidebar, since the Agents tree below says who runs where and
