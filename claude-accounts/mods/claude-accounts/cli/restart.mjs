@@ -688,7 +688,8 @@ export async function afterUse(from, to, { scopes } = {}) {
     if (tell) {
       await writeAtomic(pendingPath(home), render({ from, to, at: now, mode: switchMode, sessions: sessions.map(publicSession) }));
     }
-    return { result: { ids, asked: tell && onAccount.length > 0 }, write: write || ids.length > 0 };
+    // Asked: only ask mode asks; restart mode's file is the toast's list.
+    return { result: { ids, asked: switchMode === "ask" && tell && onAccount.length > 0 }, write: write || ids.length > 0 };
   });
   if (queued.ids.length > 0) spawnRunner();
   return { queued: queued.ids.length, asked: queued.asked };

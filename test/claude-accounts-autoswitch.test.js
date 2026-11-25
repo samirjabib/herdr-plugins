@@ -812,3 +812,20 @@ test("local-39 verify: without the tsv a Claude in a workspace folder on a full 
   const d = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
   assert.deepEqual(d.sessions.map((m) => [m.org, m.from, m.to, m.terminals]), [["none", CS5, P1, ["t10h"]]]);
 });
+
+test("local-39 verify: restart mode records a session move once: a poll that finds the terminal already heading there tells nothing", () => {
+  const s = sandbox({ workspace: true });
+  const dirs = accounts(s, [{ id: CS5, type: MAX, session: 40, weekly: 100 }, { id: P1, type: MAX, session: 7, weekly: 43 }], P1);
+  writeFileSync(join(s.home, ".claude.json"), readFileSync(join(dirs[CS5], ".claude.json")));
+  orgRows(s, [["cs", "cs", "~/.claude", "yes"], ["personal", "personal", dirs[P1], "yes"]]);
+  claudeIn(s, join(s.home, ".claude"));
+  s.cli(["settings", "set", "autoSwitch", "on"]);
+  s.cli(["settings", "set", "switchMode", "restart"]);
+  // The first poll's item, still waiting for t10h to be idle: no runner needed here.
+  const item = { id: "sw-11111111", kind: "switch", terminal: "t10h", from: "default", to: P1, sessionId: "3da9c849-6697-4058-b204-6d1a2711c6f0", args: [], message: null, state: "queued", code: null, detail: null, claimedBy: null, updatedAt: Date.now() };
+  writeFileSync(join(s.state, "restart.json"), JSON.stringify({ version: 1, items: [item] }));
+  const d = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
+  assert.equal(d.sessions, undefined, "already heading to P1");
+  assert.equal(existsSync(join(s.state, "auto-switch.json")), false, "no record, so no repeated toast");
+  assert.deepEqual(JSON.parse(s.read("restart.json")).items.map((x) => [x.terminal, x.to]), [["t10h", P1]]);
+});
