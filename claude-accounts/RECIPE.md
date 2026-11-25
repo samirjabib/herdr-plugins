@@ -184,8 +184,27 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
     contract drops a window past its reset).
   - A switch happens only while the account it read is still the active
     one, so two runs at once switch once.
+- **One active account per org.** With mac-workspace's
+  `harness/claude-profiles.tsv` (`name<TAB>org<TAB>dir<TAB>default`), each
+  org has its own pool and its own active account: cs and ag the accounts of
+  their rows (by config folder; System default is `~/.claude`), personal
+  every account. `active.<org>` in the state folder (the `active` file's
+  format) is that org's account; an org with none, or one naming an account
+  outside its pool, follows the global `active` when it is in the pool.
+  - The automatic switch runs per org, cs, then ag, then personal: each
+    org's account at the line moves to the account of its own pool with the
+    most room, and only the Claude terminals whose folder is in that org
+    (`~/mac-workspace/<org>/…`) restart. The global `active` follows when it
+    was the account that filled up, and so do the terminals outside every
+    org and the orgs with no file of their own. A pinned org
+    (`group-accounts`) never switches. `auto-switch.json` names the org, and
+    so does the toast ("ag switched to … automatically").
+  - Choosing an account by hand sets the global `active` and the file of
+    every org whose pool has it; the other orgs stay where they are.
+  - Without the tsv everything stays global, as before.
 - **Which account a terminal runs.** Inside Herdr, the `claude` launcher
-  starts each new Claude on the active account. A running terminal's
+  starts each new Claude on its folder's org account (`active.<org>`), else
+  the active account. A running terminal's
   account is the config folder holding its live session file.
 - **A group pinned to an account.** `group-accounts` in the state folder pins
   a mac-workspace group to one account: one `<group><TAB><config dir>` line
@@ -228,8 +247,14 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
   - Only safe flags are kept (`--model`, `--permission-mode`, `--effort`,
     `--settings`, `--add-dir`, `--dangerously-skip-permissions`), so a
     resumed agent never gets its first task again.
-  - A terminal whose program is Claude itself (no shell to come back to)
-    can't move, and says so.
+  - A terminal whose program is Claude itself (no shell to come back to,
+    such as a worker `ws` or `hc run` started) is started again instead:
+    once its turn is over Claude is stopped, the finished terminal removed,
+    and `hc run` opens a new one in the same folder with the same name,
+    labels, parent and keep setting, running the same program with
+    `CLAUDE_ACCOUNTS_DIR=<folder>`, its safe flags and `--resume <session>`.
+    Its address changes (the restart's record keeps the old one as
+    `relaunchedFrom`). `resume` to such a terminal still exits 8.
   - A terminal whose Claude has nothing to resume yet (no message since it
     started or since `/clear`) isn't restarted. It counts as one Claude
     couldn't move, as in Orca.

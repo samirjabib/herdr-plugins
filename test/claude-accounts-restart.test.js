@@ -205,13 +205,19 @@ function view(v) {
     pid: v.own ? v.claude : v.pid,
     argv: v.own ? v.argv : ["/bin/zsh", "-l"],
     foreground: running
-      ? { pid: v.claude, name: v.name || "claude.exe", argv: v.argv, cwd: "/tmp" }
-      : { pid: v.pid, name: "zsh", argv: ["-zsh"], cwd: "/tmp" },
+      ? { pid: v.claude, name: v.name || "claude.exe", argv: v.argv, cwd: v.cwd || "/tmp" }
+      : { pid: v.pid, name: "zsh", argv: ["-zsh"], cwd: v.cwd || "/tmp" },
     status: running ? { app: "claude-code", state: v.state || "idle" } : null,
     records: running ? v.records || null : null,
     state: v.own && !running ? "finished" : "live",
     title: v.title || null,
-    labels: {},
+    labels: v.labels || {},
+    name: v.tname || null,
+    cwd: v.launchCwd || v.cwd || "/tmp",
+    parent: v.parent || null,
+    keep: Boolean(v.keep),
+    notify: v.notify !== false,
+    die_with_parent: v.dieWithParent !== false,
   };
 }
 if (cmd === "ls") {
@@ -272,6 +278,34 @@ if (cmd === "ls") {
     }
   }
   process.stdout.write(JSON.stringify({ turn: 1 }) + "\\n");
+} else if (cmd === "rm") {
+  fs.appendFileSync(path.join(dir, "removed.log"), pos[0] + "\\n");
+  try { fs.unlinkSync(file(pos[0])); } catch {}
+  process.stdout.write("{}\\n");
+} else if (cmd === "run") {
+  // The own-program relaunch: hc run --bg --json [options] -- env CLAUDE_ACCOUNTS_DIR=<dir> <program> <args>.
+  const opts = { labels: {} };
+  let i = 0;
+  for (; i < rest.length && rest[i] !== "--"; i++) {
+    const a = rest[i];
+    if (["--cwd", "--name", "--parent"].includes(a)) opts[a.slice(2)] = rest[++i];
+    else if (a === "--label") { const [k, ...v] = rest[++i].split("="); opts.labels[k] = v.join("="); }
+    else opts[a.slice(2)] = true;
+  }
+  const cmdv = rest.slice(i + 1);
+  fs.appendFileSync(path.join(dir, "runs.log"), JSON.stringify({ opts, argv: cmdv }) + "\\n");
+  if (opts.name && fs.readdirSync(path.join(dir, "terminals")).some((f) => { const o = load(f.slice(0, -5)); return o && o.tname === opts.name && alive(o.claude); })) fail("conflict", "name in use", 1);
+  const accountsDir = cmdv[1] && cmdv[1].startsWith("CLAUDE_ACCOUNTS_DIR=") ? cmdv[1].slice(20) : null;
+  const lands = accountsDir ? accountsDir : path.join(process.env.HOME, ".claude");
+  const sid = cmdv[cmdv.indexOf("--resume") + 1];
+  const address = "t" + (100 + fs.readdirSync(path.join(dir, "terminals")).length + Math.floor(Math.random() * 1000));
+  const child = spawn("/bin/sleep", [process.env.FAKE_LIFE_S], { detached: true, stdio: "ignore" });
+  child.unref();
+  fs.appendFileSync(path.join(dir, "pids"), child.pid + "\\n");
+  fs.mkdirSync(path.join(lands, "sessions"), { recursive: true });
+  fs.writeFileSync(path.join(lands, "sessions", child.pid + ".json"), JSON.stringify({ pid: child.pid, sessionId: sid, status: "idle" }));
+  save(address, { address, pid: child.pid, claude: child.pid, own: true, argv: cmdv.slice(2), state: "idle", tname: opts.name || null, cwd: opts.cwd, labels: opts.labels, parent: opts.parent || null, keep: Boolean(opts.keep), notify: !opts["no-notify"], where: "relaunched" });
+  process.stdout.write(JSON.stringify({ address, name: opts.name || null, cwd: opts.cwd, state: "live" }) + "\\n");
 } else {
   fail("usage", "fake hc: unexpected " + argv.join(" "), 2);
 }
@@ -282,7 +316,7 @@ if (cmd === "ls") {
 let n = 0;
 let shellPids = 2_000_000; // above macOS's pid_max: never a real process
 
-function sandbox({ active = A, switchMode = "ask", remoteControl, timing = {} } = {}) {
+function sandbox({ active = A, switchMode = "ask", remoteControl, timing = {}, workspace = false } = {}) {
   const box = join(root, `s${++n}`);
   const home = join(box, "home");
   const state = join(box, "state");
@@ -310,6 +344,8 @@ function sandbox({ active = A, switchMode = "ask", remoteControl, timing = {} } 
     // wrap the text in <hc from=…>, so Claude reads a /exit as a message).
     HC_TERMINAL_ID: "t99",
     HC_SCOPE: "s99",
+    // A mac-workspace of its own (orgs.mjs) when the test gives org rows.
+    ...(workspace ? { CLAUDE_ACCOUNTS_WORKSPACE: join(box, "ws") } : {}),
   };
   for (const key of ["HOME", "TMPDIR", "CLAUDE_ACCOUNTS_HOME", "FAKE_HC_DIR"]) {
     assert.ok(env[key].startsWith(`${root}/`), `a sandbox path, never the person's: ${key}=${env[key]}`);
@@ -434,6 +470,7 @@ function sandbox({ active = A, switchMode = "ask", remoteControl, timing = {} } 
   s.calls = () => lines("calls.log");
   s.sends = (t) => lines("sends.log").filter((x) => !t || x.terminal === t);
   s.typed = (t) => lines("typed.log").filter((x) => !t || x.terminal === t);
+  s.runs = () => lines("runs.log");
   s.queue = () => {
     const file = join(state, "restart.json");
     return existsSync(file) ? JSON.parse(readFileSync(file, "utf8")).items : [];
@@ -591,7 +628,7 @@ test("use, Ask: onAccount, elsewhere and every cantMove reason go to pending-swi
   assert.deepEqual(groups, {
     t1: ["onAccount", null, A],
     t2: ["elsewhere", null, "default"],
-    t3: ["cantMove", "own-program", A],
+    t3: ["onAccount", null, A],
     t4: ["cantMove", "shared-session", A],
     t5: ["cantMove", "shared-session", A],
     t6: ["cantMove", "no-session", null],
@@ -754,18 +791,21 @@ test("use, Ask: --answer restart queues only the listed sessions that were ticke
   const s = sandbox({ active: A, switchMode: "ask" });
   const t1 = s.term("t1", { on: A });
   const t2 = s.term("t2", { on: "default" });
-  s.term("t3", { on: A, own: true });
+  const t3 = s.term("t3", { on: A, own: true });
   s.json(["use", B]);
   assert.equal(s.pending().sessions.length, 3);
 
   const r = s.cli(["restart", "--answer", "restart", "--terminal", "t2", "--terminal", "t3", "--json"]);
   assert.equal(r.status, 0, r.stderr);
   const { queued } = JSON.parse(r.stdout);
-  assert.equal(queued.length, 1, "t3 can't move, so it was never listed");
+  assert.equal(queued.length, 2, "t3, Claude as its own program, moves too (relaunched with hc run)");
   assert.equal(s.pending(), null, "answered");
   const item = s.queue().find((i) => i.id === queued[0]);
   assert.deepEqual([item.terminal, item.from, item.to], ["t2", "default", B]);
   await until(() => s.item((i) => i.id === item.id && i.state === "done"), WAIT, "t2's restart");
+  await until(() => s.item((i) => i.id === queued[1] && i.state === "done"), WAIT, "t3's relaunch", s.queue);
+  assert.ok(!alive(t3.pid));
+  assert.equal(s.runs().length, 1);
   assert.ok(alive(t1.pid), "t1 wasn't ticked");
   assert.ok(!alive(t2.pid));
 
@@ -2106,4 +2146,66 @@ test("every hc call ran without HC_TERMINAL_ID or HC_SCOPE, and no runner or fak
   await until(() => runnerPids().length === 0, WAIT, "every runner to exit", runnerPids);
   killAll();
   await until(() => [...fakePids, ...shimPids()].every((pid) => !alive(pid)), WAIT, "every fake Claude to be gone");
+});
+
+// ── Own-program terminals and per-org switches (odd/tasks/autoswitch-orgs.md) ─
+
+test("S2: use, Always restart: a terminal whose own program is Claude starts again with hc run (same cwd, name, labels, parent) and resumes on the new account", async () => {
+  const s = sandbox({ active: A, switchMode: "restart" });
+  const t1 = s.term("t1", {
+    on: A, own: true, cwd: "/work/repo", tname: "worker-x", labels: { "herdr.space": "sp1", where: "repo / x" }, parent: "t62", dieWithParent: false,
+    argv: ["/Users/tester/.local/bin/claude", "--dangerously-skip-permissions", "do the task"],
+  });
+  const r = s.cli(["use", B, "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(s.pending().sessions.map((x) => [x.terminal, x.group, x.reason]), [["t1", "onAccount", null]]);
+  const [item] = s.queue();
+  const done = await until(() => s.item((i) => i.id === item.id && ["done", "failed", "timeout", "landedElsewhere"].includes(i.state)), WAIT, "the relaunch", s.queue);
+  assert.equal(done.state, "done", done.detail);
+  assert.ok(!alive(t1.pid), "the old Claude was stopped");
+  const [run] = s.runs();
+  assert.deepEqual(run.opts, {
+    bg: true, json: true, cwd: "/work/repo", name: "worker-x", labels: { "herdr.space": "sp1", where: "repo / x" },
+    parent: "t62", "outlive-parent": true,
+  });
+  assert.deepEqual(run.argv, ["/usr/bin/env", `CLAUDE_ACCOUNTS_DIR=${s.dirs[B]}`, "/Users/tester/.local/bin/claude", "--dangerously-skip-permissions", "--resume", t1.sessionId],
+    "the first task is never sent again");
+  assert.equal(done.relaunchedFrom, "t1");
+  assert.notEqual(done.terminal, "t1");
+  assert.equal(s.json(["terminal", done.terminal]).account, B, "the new terminal runs on B");
+  assert.deepEqual(s.typed(), [], "nothing is typed: there is no shell");
+});
+
+test("S2: an own-program Claude that is busy waits for its turn to end; a resume job to it still refuses (exit 8)", async () => {
+  const s = sandbox({ active: A, switchMode: "restart" });
+  const t1 = s.term("t1", { on: A, own: true, status: "busy", state: "working" });
+  const job = s.cli(["resume", "--terminal", "t1", "--account", B, "--json"]);
+  assert.equal(job.status, 8);
+  s.cli(["use", B, "--json"]);
+  await until(() => s.item((i) => i.terminal === "t1" && i.state === "waitingIdle"), WAIT, "waiting for idle", s.queue);
+  assert.ok(alive(t1.pid), "a busy Claude is never stopped");
+  assert.deepEqual(s.runs(), []);
+  t1.setSession({ status: "idle" });
+  t1.set({ state: "idle" });
+  await until(() => s.item((i) => i.state === "done"), WAIT, "the relaunch", s.queue);
+  assert.equal(s.runs().length, 1);
+});
+
+test("S1: with per-org accounts, a switch moves only the terminals of the orgs whose account moved", async () => {
+  const s = sandbox({ active: A, switchMode: "restart", workspace: true });
+  const ws = join(s.box, "ws");
+  mkdirSync(join(ws, "harness"), { recursive: true });
+  // A and B are ag's; cs runs on System default only.
+  writeFileSync(join(ws, "harness", "claude-profiles.tsv"), `name\torg\tdir\tdefault\ncs\tcs\t~/.claude\tyes\nag\tag\t${s.dirs[A]}\tyes\nb\tag\t${s.dirs[B]}\tno\n`);
+  for (const rel of ["ag/shop/main", "cs/site/main"]) mkdirSync(join(ws, rel), { recursive: true });
+  const t1 = s.term("t1", { on: A, cwd: join(ws, "ag/shop/main") });
+  const t2 = s.term("t2", { on: A, cwd: join(ws, "cs/site/main") });
+  const r = s.cli(["use", B, "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(s.pending().sessions.map((x) => x.terminal), ["t1"], "the cs terminal isn't part of ag's switch");
+  await until(() => s.item((i) => i.terminal === "t1" && i.state === "done"), WAIT, "t1's restart", s.queue);
+  assert.ok(alive(t2.pid), "the cs Claude is left alone");
+  assert.deepEqual(s.typed("t2"), []);
+  assert.equal(s.typed("t1")[0].dir, s.dirs[B]);
+  assert.ok(!alive(t1.pid));
 });

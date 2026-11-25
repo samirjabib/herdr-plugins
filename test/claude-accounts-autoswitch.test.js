@@ -21,7 +21,7 @@ import { accountsModel } from "../claude-accounts/mods/claude-accounts/accounts-
 import { panelModel, footerModel, popupModel } from "../claude-accounts/mods/claude-accounts/footer-model.js";
 import { react } from "../claude-accounts/mods/claude-accounts/toasts.js";
 import {
-  PAY_PER_USE_TAG, isPayPerUse, payPerUsePrompt, autoSwitchSetting, readAutoSwitch,
+  PAY_PER_USE_TAG, isPayPerUse, payPerUsePrompt, autoSwitchSetting, readAutoSwitch, autoSwitchToast,
 } from "../claude-accounts/mods/claude-accounts/switch-model.js";
 
 const repo = fileURLToPath(new URL("..", import.meta.url));
@@ -155,7 +155,7 @@ const root = realpathSync(mkdtempSync(join(tmpdir(), "claude-accounts-autoswitch
 after(() => rmSync(root, { recursive: true, force: true }));
 
 let n = 0;
-function sandbox() {
+function sandbox({ workspace = false } = {}) {
   const box = join(root, String(++n));
   const home = join(box, "home");
   const state = join(box, "state");
@@ -173,6 +173,8 @@ function sandbox() {
     CLAUDE_ACCOUNTS_HOME: state,
     CLAUDE_ACCOUNTS_USAGE_URL: "http://127.0.0.1:9/api/oauth/usage",
     CLAUDE_ACCOUNTS_USAGE_BIN: join(shims, "claude-usage"),
+    // A mac-workspace of its own when the test lists org rows (S1).
+    ...(workspace ? { CLAUDE_ACCOUNTS_WORKSPACE: join(box, "ws") } : {}),
   };
   const cli = (args) => {
     const r = spawnSync(BIN, args, { env, encoding: "utf8", timeout: 30000 });
@@ -436,4 +438,149 @@ test("S5: an active pay-per-use account: the card, the footer and the popover sa
   // Signed out: signing in comes first, as for any account.
   raw.accounts = raw.accounts.map((a) => (a.id === BEN ? { ...a, needsSignIn: true } : a));
   assert.equal(footerModel({ doc: readAccounts(JSON.stringify(raw)), width: 1000, now: NOW }).kind, "signIn");
+});
+
+// ── One active account per org (odd/tasks/autoswitch-orgs.md S1) ──────────
+
+const ORGS_MJS = pathToFileURL(join(MOD, "cli/orgs.mjs")).href;
+const { parseProfiles, poolOf, orgOfCwd, effectiveActives } = await import(ORGS_MJS);
+
+test("S1: the tsv's rows give each org its pool; personal is every account", () => {
+  const env = { HOME: "/Users/me" };
+  const rows = parseProfiles([
+    "name\torg\tdir\tdefault",
+    "# a comment",
+    "cs\tcs\t~/.claude\tyes",
+    "ag\tag\t~/.claude-profiles/ag\tyes",
+    "u\tag\t/abs/u/home\tno",
+    "odd\tnowhere\t/x\tno",
+    "",
+  ].join("\n"), env);
+  assert.deepEqual(rows, [
+    { name: "cs", org: "cs", dir: "/Users/me/.claude" },
+    { name: "ag", org: "ag", dir: "/Users/me/.claude-profiles/ag" },
+    { name: "u", org: "ag", dir: "/abs/u/home" },
+  ]);
+  const accounts = [
+    { id: "default", isDefault: true, configDir: null },
+    { id: "a1", isDefault: false, configDir: "/Users/me/.claude-profiles/ag" },
+    { id: "a2", isDefault: false, configDir: "/abs/u/home" },
+    { id: "x", isDefault: false, configDir: "/elsewhere/home" },
+  ];
+  assert.deepEqual([...poolOf("cs", accounts, rows, env)], ["default"]);
+  assert.deepEqual([...poolOf("ag", accounts, rows, env)], ["a1", "a2"]);
+  assert.deepEqual([...poolOf("personal", accounts, rows, env)], ["default", "a1", "a2", "x"]);
+});
+
+test("S1: a terminal's org is the first folder under the workspace root; anything else has none", async () => {
+  const env = { CLAUDE_ACCOUNTS_WORKSPACE: "/no/such/ws" };
+  assert.equal(await orgOfCwd("/no/such/ws/ag/shop/worktrees/x/src", env), "ag");
+  assert.equal(await orgOfCwd("/no/such/ws/personal/herdr-plugins/main", env), "personal");
+  assert.equal(await orgOfCwd("/no/such/ws/cs", env), null, "the org folder itself runs no project");
+  assert.equal(await orgOfCwd("/no/such/ws/docs/x", env), null);
+  assert.equal(await orgOfCwd("/no/such/wsx/ag/shop", env), null);
+  assert.equal(await orgOfCwd(null, env), null);
+});
+
+test("S1: an org runs on its own file's account when it is in its pool, else on the global one when that is, else on none", () => {
+  const rows = [{ name: "ag", org: "ag", dir: "/ag" }, { name: "u", org: "ag", dir: "/u" }, { name: "cs", org: "cs", dir: "/h/.claude" }];
+  const accounts = [{ id: "default", isDefault: true }, { id: "ag", configDir: "/ag" }, { id: "u", configDir: "/u" }, { id: "p", configDir: "/p" }];
+  const env = { HOME: "/h" };
+  const known = { active: "ag", accounts };
+  assert.deepEqual(effectiveActives({ known, rows, orgDirs: {}, env }), { none: "ag", cs: null, ag: "ag", personal: "ag" });
+  assert.deepEqual(effectiveActives({ known, rows, orgDirs: { ag: "/u", personal: "/p", cs: "/p" }, env }), { none: "ag", cs: null, ag: "u", personal: "p" },
+    "cs's file names an account outside its pool: ignored");
+  assert.deepEqual(effectiveActives({ known: { active: "p", accounts }, rows, orgDirs: { cs: "" }, env }), { none: "p", cs: "default", ag: null, personal: "p" });
+});
+
+// The sandbox's mac-workspace: harness/claude-profiles.tsv with these rows.
+function orgRows(s, rows) {
+  const dir = join(s.box, "ws", "harness");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "claude-profiles.tsv"), ["name\torg\tdir\tdefault", ...rows.map((r) => r.join("\t"))].join("\n") + "\n");
+}
+
+const AG1 = "a1a1a1a1-1111-4111-8111-111111111111";
+const AG2 = "a2a2a2a2-2222-4222-8222-222222222222";
+const P1 = "p1p1p1p1-3333-4333-8333-333333333333";
+
+test("S1: per org, the ag account at 96% moves to the other ag account, never to an account of another org with more room", () => {
+  const s = sandbox({ workspace: true });
+  const dirs = accounts(s, [
+    { id: AG1, type: MAX, session: 96, weekly: 40 },
+    { id: AG2, type: MAX, session: 50, weekly: 50 },
+    { id: P1, type: MAX, session: 0, weekly: 0 },
+  ], AG1);
+  orgRows(s, [["ag", "ag", dirs[AG1], "yes"], ["u", "ag", dirs[AG2], "no"]]);
+  s.cli(["settings", "set", "autoSwitch", "on"]);
+  const check = s.cli(["auto-switch", "check", "--json"]);
+  assert.equal(check.status, 0, check.stderr);
+  const d = JSON.parse(check.stdout);
+  assert.deepEqual([d.action, d.from, d.to], ["switch", AG1, AG2]);
+  assert.deepEqual(d.orgs.map((x) => [x.org, x.action]), [["cs", "none"], ["ag", "switch"], ["personal", "none"]],
+    "personal followed the global account, now AG2, under the line");
+  assert.equal(s.read("active.ag"), dirs[AG2], "ag's own active file");
+  assert.equal(s.read("active"), dirs[AG2], "the global active followed: it was the account that filled up");
+  assert.equal(existsSync(join(s.state, "active.personal")), false);
+  const record = JSON.parse(s.read("auto-switch.json"));
+  assert.deepEqual([record.state, record.org, record.from, record.to, record.percent], ["switched", "ag", AG1, AG2, 96]);
+  // Idempotent.
+  const again = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
+  assert.equal(again.action, "none");
+});
+
+test("S1: personal runs on any account, a cs or ag one too; its switch leaves cs and ag where they are; a pinned org never switches", () => {
+  const s = sandbox({ workspace: true });
+  const dirs = accounts(s, [
+    { id: AG1, type: MAX, session: 10, weekly: 10 },
+    { id: AG2, type: MAX, session: 20, weekly: 20 },
+    { id: P1, type: MAX, session: 97, weekly: 30 },
+  ], AG1);
+  orgRows(s, [["ag", "ag", dirs[AG1], "yes"], ["u", "ag", dirs[AG2], "no"]]);
+  writeFileSync(join(s.state, "active.personal"), dirs[P1]);
+  s.cli(["settings", "set", "autoSwitch", "on"]);
+  const d = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
+  assert.deepEqual([d.action, d.from, d.to], ["switch", P1, AG1], "an ag account is personal's too, the one with the most room");
+  assert.equal(s.read("active.personal"), dirs[AG1]);
+  assert.equal(s.read("active"), dirs[AG1], "the global account was AG1 already");
+  assert.equal(existsSync(join(s.state, "active.ag")), false, "ag untouched");
+  assert.equal(JSON.parse(s.read("auto-switch.json")).org, "personal");
+
+  // A pin in group-accounts: that org's Claudes never follow, so no switch.
+  writeFileSync(join(s.state, "active.personal"), dirs[P1]);
+  writeFileSync(join(s.state, "group-accounts"), `personal\t${dirs[P1]}\n`);
+  const p = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
+  assert.deepEqual(p.orgs.find((x) => x.org === "personal"), { org: "personal", action: "none", reason: "pinned" });
+  assert.equal(s.read("active.personal"), dirs[P1]);
+});
+
+test("S1: `use` by hand sets every org whose pool has the account, and leaves the others", () => {
+  const s = sandbox({ workspace: true });
+  const dirs = accounts(s, [
+    { id: AG1, type: MAX, session: 10, weekly: 10 },
+    { id: AG2, type: MAX, session: 20, weekly: 20 },
+    { id: P1, type: MAX, session: 0, weekly: 0 },
+  ], AG1);
+  orgRows(s, [["ag", "ag", dirs[AG1], "yes"], ["u", "ag", dirs[AG2], "no"]]);
+  writeFileSync(join(s.state, "active.ag"), dirs[AG1]);
+  let r = s.cli(["use", P1, "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(s.read("active"), dirs[P1]);
+  assert.equal(s.read("active.personal"), dirs[P1]);
+  assert.equal(s.read("active.ag"), dirs[AG1], "P1 is no ag account: ag stays on AG1");
+  r = s.cli(["use", AG2, "--json"]);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(s.read("active.ag"), dirs[AG2]);
+  assert.equal(s.read("active.personal"), dirs[AG2]);
+});
+
+test("S3: the toast of a per-org switch names the org; a global one reads as before", () => {
+  const label = (id) => ({ a: "a@example.com", b: "b@example.com" })[id] ?? id;
+  const org = autoSwitchToast(readAutoSwitch({ state: "switched", org: "ag", from: "a", to: "b", at: 1, window: "session", percent: 96 }), label);
+  assert.equal(org.toast.title, "ag switched to b@example.com automatically");
+  assert.equal(org.toast.body, "a@example.com reached 96% of its 5-hour limit.");
+  const stuck = autoSwitchToast(readAutoSwitch({ state: "stuck", org: "personal", from: "a", at: 1, window: "weekly", percent: 99 }), label);
+  assert.equal(stuck.toast.title, "personal: a@example.com reached 99% of its weekly limit");
+  const plain = autoSwitchToast(readAutoSwitch({ state: "switched", from: "a", to: "b", at: 1, window: "session", percent: 96 }), label);
+  assert.equal(plain.toast.title, "Switched to b@example.com automatically");
 });

@@ -159,6 +159,7 @@ import { failure, isAlive, readJson, render, withLock, writeAtomic } from "./fil
 import { knownAccounts, readSettings, sameEmail } from "./accounts.mjs";
 import { contractUsage } from "./usage.mjs";
 import { dialogQuestion } from "./dialog.mjs";
+import { orgOfCwd } from "./orgs.mjs";
 import { HC_SEND_TIMEOUT_MS, getTerminal, hasTranscript, hc, inspectTerminal, isIdle, lastPrompt, lastTurn, listClaudeTerminals } from "./terminals.mjs";
 
 // Milliseconds. poll: how often a loop re-reads its terminal; shell and
@@ -225,6 +226,29 @@ export function shellQuote(value) {
 export function resumeLine(dir, args, sessionId, { remoteControl = false } = {}) {
   const all = remoteControl && !args.includes(REMOTE_FLAG) ? [REMOTE_FLAG, ...args] : args;
   return [`CLAUDE_ACCOUNTS_DIR=${shellQuote(dir)}`, "claude", ...all.map(shellQuote), "--resume", shellQuote(sessionId)].join(" ");
+}
+
+// The `hc run` that starts an own-program terminal again (S2), from its
+// `hc get` record: same folder (the foreground's current one), name, labels,
+// parent and keep, running the same program (the terminal's own argv[0], so
+// a launcher or the mac-workspace shim still picks the account) with
+// CLAUDE_ACCOUNTS_DIR set to the target, as the typed line does, and the
+// kept args plus --resume. { argv, cwd }: argv is hc's.
+export function relaunchArgs(info, dir, args, sessionId, { remoteControl = false } = {}) {
+  const cwd = (typeof info?.foreground?.cwd === "string" && info.foreground.cwd) || info?.cwd || "/";
+  const program = (Array.isArray(info?.argv) && typeof info.argv[0] === "string" && info.argv[0]) || "claude";
+  const all = remoteControl && !args.includes(REMOTE_FLAG) ? [REMOTE_FLAG, ...args] : args;
+  const out = ["run", "--bg", "--json", "--cwd", cwd];
+  if (typeof info?.name === "string" && info.name) out.push("--name", info.name);
+  for (const [k, v] of Object.entries(info?.labels ?? {})) if (typeof v === "string") out.push("--label", `${k}=${v}`);
+  if (typeof info?.parent === "string" && info.parent) {
+    out.push("--parent", info.parent);
+    if (info.die_with_parent === false) out.push("--outlive-parent");
+  } else out.push("--no-parent");
+  if (info?.keep === true) out.push("--keep");
+  if (info?.notify === false) out.push("--no-notify");
+  out.push("--", "/usr/bin/env", `CLAUDE_ACCOUNTS_DIR=${dir ?? ""}`, program, ...all, "--resume", sessionId);
+  return { argv: out, cwd };
 }
 
 // D8's kept args: Orca rebuilds `claude [--effort] --resume <id>`; this keeps
@@ -517,7 +541,6 @@ function classify(scan, from, to, known) {
     if (found.kind === "missing" || found.kind === "unreadable") cantMove("unreadable");
     else if (found.kind === "noSession") cantMove("no-session");
     else if (runsOnAccount(found.account, to, known)) continue;
-    else if (found.ownProgram) cantMove("own-program");
     else if (found.account === null) cantMove("unknown-account");
     else if (!found.resumable) cantMove("no-session");
     else if (holders.get(found.sessionId) > 1) cantMove("shared-session");
@@ -580,9 +603,10 @@ const keptOut = (doc, terminal, to) =>
 // session and args, its last prompt read from `from`'s folder, status
 // "busy" (it's restarting), and the scan's title, null when the scan didn't
 // list the terminal. Called inside afterUse's lock, with the queue as it is.
-async function withRestarting(sessions, scan, doc, from, since, known) {
+async function withRestarting(sessions, scan, doc, from, since, known, outOfScope = new Set()) {
   const rows = new Map();
   for (const terminal of new Set(doc.items.map((item) => item.terminal))) {
+    if (outOfScope.has(terminal)) continue;
     const item = headingTo(doc, terminal, from, since);
     if (!item) continue;
     const seen = scan.find((s) => s.terminal === terminal);
@@ -604,7 +628,7 @@ async function withRestarting(sessions, scan, doc, from, since, known) {
   return out;
 }
 
-export async function afterUse(from, to) {
+export async function afterUse(from, to, { scopes } = {}) {
   if (from === to) return;
   const home = stateHome();
   const t = timing();
@@ -620,6 +644,16 @@ export async function afterUse(from, to) {
       say(`claude-accounts: couldn't list Herdr's terminals (${e.message}); Claude terminals stay where they are.`);
     }
   }
+  // With per-org accounts (orgs.mjs), only the terminals whose org's account
+  // moved follow: the org of each one's folder, "none" outside every org.
+  // The others, and their waiting restarts, are left alone.
+  let outOfScope = new Set();
+  if (scopes) {
+    const keep = new Set(scopes);
+    const scopeOf = await Promise.all(scan.map(async (s) => (await orgOfCwd(s.found.cwd)) ?? "none"));
+    outOfScope = new Set(scan.filter((_, i) => !keep.has(scopeOf[i])).map((s) => s.terminal));
+    scan = scan.filter((s) => !outOfScope.has(s.terminal));
+  }
   const scanned = switchMode === "keep" ? [] : await withPrompts(classify(scan, from, to, known), scan);
   const accountOf = new Map(scan.filter((s) => s.found.kind === "claude").map((s) => [s.terminal, s.found.account]));
 
@@ -627,7 +661,7 @@ export async function afterUse(from, to) {
     await rm(pendingPath(home), { force: true });
     let write = false;
     doc.items = doc.items.filter((item) => {
-      if (item.kind !== "switch" || !NOT_STARTED.has(item.state)) return true;
+      if (item.kind !== "switch" || !NOT_STARTED.has(item.state) || outOfScope.has(item.terminal)) return true;
       write = true;
       // The scan reads where the terminal runs now. With an item already
       // acting on it, it won't run there for long: this one follows the
@@ -637,7 +671,7 @@ export async function afterUse(from, to) {
       return true;
     });
     if (switchMode === "keep") return { result: [], write };
-    const sessions = await withRestarting(scanned, scan, doc, from, since, known);
+    const sessions = await withRestarting(scanned, scan, doc, from, since, known, outOfScope);
     const onAccount = sessions.filter((s) => s.group === "onAccount");
     const ids = [];
     if (switchMode === "restart") {
@@ -734,7 +768,7 @@ async function answer(choice, ticked, json) {
         // new Claude with no session file yet); runItem re-reads it once the
         // first restart ends.
         const restarting = headingTo(doc, f.terminal, pending.from, pending.at);
-        if (!restarting && (f.kind !== "claude" || f.ownProgram || f.account === pending.to)) continue;
+        if (!restarting && (f.kind !== "claude" || f.account === pending.to)) continue;
         if (keptOut(doc, f.terminal, pending.to)) continue;
         const fields = restarting
           ? { from: pending.from, sessionId: restarting.sessionId, args: restarting.args ?? [] }
@@ -952,7 +986,7 @@ async function runItem(home, id, t) {
       else if ((await drop(home, id, item)) === "skip") continue;
       return;
     }
-    if (found.ownProgram) {
+    if (found.ownProgram && item.kind !== "switch") {
       await finish(home, id, "failed", `Claude is terminal ${item.terminal}'s own program: there's no shell to restart it in`);
       return;
     }
@@ -1023,9 +1057,17 @@ async function runItem(home, id, t) {
     await sleep(t.poll);
   }
 
+  // Claude is the terminal's own program (S2): no shell comes back, so its
+  // terminal is read now, to start a new one like it once Claude is gone.
+  const own = found.ownProgram ? await getTerminal(item.terminal).catch(() => null) : null;
+  if (found.ownProgram && !own) {
+    await finish(home, id, "failed", withLine(`couldn't read terminal ${item.terminal}`, line));
+    return;
+  }
+
   // 2. Stop Claude: SIGTERM to the foreground (probe b4).
   const pid = found.foregroundPid;
-  if (Number.isInteger(pid) && pid > 1 && pid !== found.pid && pid !== process.pid) {
+  if (Number.isInteger(pid) && pid > 1 && (own || pid !== found.pid) && pid !== process.pid) {
     try {
       process.kill(pid, "SIGTERM");
     } catch (e) {
@@ -1036,7 +1078,9 @@ async function runItem(home, id, t) {
     }
   }
 
-  // 3. Wait for the shell.
+  // 3. Wait for the shell. An own-program terminal ends instead (or, kept
+  // by Herdr, gets a shell in place, which takes the typed line as usual).
+  let relaunch = false;
   const shellBy = Date.now() + t.shell;
   for (;;) {
     let info;
@@ -1045,11 +1089,15 @@ async function runItem(home, id, t) {
     } catch {
       info = undefined;
     }
+    if (own && (info === null || info?.state === "finished")) {
+      relaunch = true;
+      break;
+    }
     if (info === null || info?.state === "finished") {
       await finish(home, id, "failed", withLine(`terminal ${item.terminal} is gone`, line));
       return;
     }
-    if (info && Number.isInteger(info.foreground?.pid) && info.foreground.pid === info.pid) break;
+    if (info && Number.isInteger(info.foreground?.pid) && info.foreground.pid === info.pid && (!own || info.foreground.pid !== pid)) break;
     if (Date.now() >= shellBy) {
       await finish(home, id, "timeout", withLine(`the shell didn't come back within ${Math.round(t.shell / 1000)} s`, line));
       return;
@@ -1057,14 +1105,38 @@ async function runItem(home, id, t) {
     await sleep(t.poll);
   }
 
-  // 4. Type the line.
+  // 4. Type the line, or start the own-program terminal again (S2).
   item = await setState(home, id, "starting");
   if (!item) return;
-  try {
-    await hc(["send", "--", item.terminal, line], { timeout: HC_SEND_TIMEOUT_MS });
-  } catch (e) {
-    await finish(home, id, "failed", withLine(`couldn't type the resume line (${e.message})`, line));
-    return;
+  if (relaunch) {
+    const dir = targetDir(known, item.to);
+    const args = relaunchArgs(own, dir, item.args ?? [], item.sessionId, await lineOptions(home));
+    line = `cd ${shellQuote(args.cwd)} && ${resumeLine(dir, item.args ?? [], item.sessionId, await lineOptions(home))}`;
+    await hc(["rm", "--", item.terminal]).catch(() => {});
+    let address;
+    try {
+      address = JSON.parse(await hc(args.argv, { timeout: HC_SEND_TIMEOUT_MS }))?.address;
+    } catch (e) {
+      await finish(home, id, "failed", withLine(`couldn't start terminal ${item.terminal} again (${e.message})`, line));
+      return;
+    }
+    if (typeof address !== "string" || !address) {
+      await finish(home, id, "failed", withLine(`hc run gave no address for terminal ${item.terminal}`, line));
+      return;
+    }
+    const old = item.terminal;
+    item = await mutate(home, id, (current) => {
+      current.relaunchedFrom = old;
+      current.terminal = address;
+    });
+    if (!item) return;
+  } else {
+    try {
+      await hc(["send", "--", item.terminal, line], { timeout: HC_SEND_TIMEOUT_MS });
+    } catch (e) {
+      await finish(home, id, "failed", withLine(`couldn't type the resume line (${e.message})`, line));
+      return;
+    }
   }
 
   // 5. Wait for the new Claude, idle and on the target. The shell back in

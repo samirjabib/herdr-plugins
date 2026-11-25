@@ -109,14 +109,20 @@ export function autoSwitchToast(record, label) {
   if (!record) return null;
   const limit = `${record.percent ?? 95}% of its ${WINDOW_NAMES[record.window]} limit`;
   const from = label(record.from);
+  // A per-org switch (cli/orgs.mjs) names its mac-workspace org.
+  const org = str(record.org);
   if (record.state === "switched") {
     return {
-      key: `auto:${record.at ?? ""}:${record.from}:${record.to}`,
-      toast: { title: `Switched to ${label(record.to)} automatically`, body: `${from} reached ${limit}.`, level: "info" },
+      key: `auto:${record.at ?? ""}:${org ?? ""}:${record.from}:${record.to}`,
+      toast: {
+        title: org ? `${org} switched to ${label(record.to)} automatically` : `Switched to ${label(record.to)} automatically`,
+        body: `${from} reached ${limit}.`,
+        level: "info",
+      },
     };
   }
   return {
-    key: `auto:${record.at ?? ""}:${record.from}:stuck`,
-    toast: { title: `${from} reached ${limit}`, body: `No other Max or Pro account has room, so it stays on ${from}.`, level: "warning" },
+    key: `auto:${record.at ?? ""}:${org ?? ""}:${record.from}:stuck`,
+    toast: { title: `${org ? `${org}: ` : ""}${from} reached ${limit}`, body: `No other Max or Pro account has room, so it stays on ${from}.`, level: "warning" },
   };
 }

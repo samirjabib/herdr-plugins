@@ -29,11 +29,21 @@
 //   { state: "switched", from, to, at, window, percent }
 //   { state: "stuck", from, at, window, percent, resetsAt }  once per window
 // `usage` runs it after every merge, so it follows each poll and each turn.
+//
+// Per org (odd/tasks/autoswitch-orgs.md S1, cli/orgs.mjs): with mac-workspace's
+// claude-profiles.tsv it runs once per org (cs, ag, personal), each on its
+// own active account and pool (pickOrgAutoSwitch), skipping an org pinned in
+// group-accounts. A switch goes through accounts.switchOrgAccount: that
+// org's active file, the global one when it was the full account, and only
+// the terminals of the orgs whose account moved restart. The record carries
+// `org`. The result is the first switch (else stay, else none) plus `orgs`,
+// every org's decision.
 
 import { parseArgs } from "node:util";
 import { FILES, stateHome } from "./paths.mjs";
 import { failure, readJson, rebuildContract, render, withLock, writeAtomic } from "./files.mjs";
-import { knownAccounts, readSettings, sameEmail, switchAccount } from "./accounts.mjs";
+import { knownAccounts, readSettings, sameEmail, switchAccount, switchOrgAccount } from "./accounts.mjs";
+import { ORGS, effectiveActives, pinnedOrgs, poolOf, readOrgActives, readProfiles } from "./orgs.mjs";
 import { join } from "node:path";
 
 export const SWITCH_LINE = 95;
@@ -121,31 +131,75 @@ export function pickAutoSwitch(doc, { now = Date.now(), line = SWITCH_LINE, excl
 
 const recordPath = (home) => join(home, FILES.autoSwitch);
 
+// The record the footer and the toast tell. org: the mac-workspace org that
+// switched, absent when the switch is global (no claude-profiles.tsv).
+async function record(home, decision, now, org) {
+  const tag = org ? { org } : {};
+  if (decision.action === "switch") {
+    await withLock(home, () => writeAtomic(recordPath(home), render({
+      state: "switched", ...tag, from: decision.from, to: decision.to, at: now, window: decision.window, percent: decision.percent,
+    })));
+  } else if (decision.action === "stay") {
+    await withLock(home, async () => {
+      const old = await readJson(recordPath(home)).catch(() => null);
+      const same = old?.state === "stuck" && (old.org ?? null) === (org ?? null) && old.from === decision.from &&
+        old.window === decision.window && old.resetsAt === decision.resetsAt;
+      if (!same) {
+        await writeAtomic(recordPath(home), render({
+          state: "stuck", ...tag, from: decision.from, at: now, window: decision.window, percent: decision.percent, resetsAt: decision.resetsAt,
+        }));
+      }
+    });
+  }
+}
+
+// One org's decision: its pool (plus System default, whose numbers the same
+// login borrows) and its own active account.
+export function pickOrgAutoSwitch(doc, { org, active, pool, ...options }) {
+  if (!active) return { action: "none", reason: "noActive" };
+  const accounts = (doc?.accounts ?? []).filter((a) => a.isDefault || pool.has(a.id));
+  return pickAutoSwitch({ ...doc, active, accounts }, options);
+}
+
 export async function checkAutoSwitch(home = stateHome(), now = Date.now()) {
   const { autoSwitch } = await readSettings(home);
   if (autoSwitch !== "on") return { action: "none", reason: "off" };
   const known = await knownAccounts(home);
   const excluded = known.accounts.filter((a) => a.autoSwitchExcluded).map((a) => a.id);
-  const decision = pickAutoSwitch(await rebuildContract(home), { now, excluded });
-  if (decision.action === "switch") {
-    const { from, to } = await switchAccount(decision.to, { onlyFrom: decision.from });
-    // Another run switched first: its record stands.
-    if (from === to) return { action: "none", reason: "moved" };
-    await withLock(home, () => writeAtomic(recordPath(home), render({
-      state: "switched", from, to, at: now, window: decision.window, percent: decision.percent,
-    })));
-  } else if (decision.action === "stay") {
-    await withLock(home, async () => {
-      const old = await readJson(recordPath(home)).catch(() => null);
-      const same = old?.state === "stuck" && old.from === decision.from && old.window === decision.window && old.resetsAt === decision.resetsAt;
-      if (!same) {
-        await writeAtomic(recordPath(home), render({
-          state: "stuck", from: decision.from, at: now, window: decision.window, percent: decision.percent, resetsAt: decision.resetsAt,
-        }));
-      }
-    });
+  const rows = await readProfiles();
+  if (!rows) {
+    const decision = pickAutoSwitch(await rebuildContract(home), { now, excluded });
+    if (decision.action === "switch") {
+      const { from, to } = await switchAccount(decision.to, { onlyFrom: decision.from });
+      // Another run switched first: its record stands.
+      if (from === to) return { action: "none", reason: "moved" };
+    }
+    await record(home, decision, now);
+    return decision;
   }
-  return decision;
+  // One org at a time, each on its own active account and its own pool. An
+  // org a switch moved already (it followed the global active) reads its new
+  // account, under the line: no second switch.
+  const pinned = await pinnedOrgs(home);
+  const orgs = [];
+  for (const org of ORGS) {
+    if (pinned.has(org)) {
+      orgs.push({ org, action: "none", reason: "pinned" });
+      continue;
+    }
+    const k = await knownAccounts(home);
+    const active = effectiveActives({ known: k, rows, orgDirs: await readOrgActives(home) })[org];
+    const pool = poolOf(org, k.accounts, rows);
+    let decision = pickOrgAutoSwitch(await rebuildContract(home), { org, active, pool, now, excluded });
+    if (decision.action === "switch") {
+      const { from, to } = await switchOrgAccount(org, decision.to, { onlyFrom: decision.from });
+      if (from === to) decision = { action: "none", reason: "moved" };
+    }
+    await record(home, decision, now, org);
+    orgs.push({ org, ...decision });
+  }
+  const first = orgs.find((d) => d.action === "switch") ?? orgs.find((d) => d.action === "stay") ?? { action: "none", reason: "underLine" };
+  return { ...first, orgs };
 }
 
 // ── auto-switch ─────────────────────────────────────────────────────────────
@@ -158,7 +212,8 @@ export async function autoSwitchCommand(args) {
   const print = (value, human) => process.stdout.write(values.json ? render(value) : `${human}\n`);
   if (verb === "check" && positionals.length === 1) {
     const d = await checkAutoSwitch();
-    print(d, d.action === "switch" ? `Switched from ${d.from} to ${d.to}.` : d.action === "stay" ? `Stays on ${d.from}: no account has room.` : `Nothing to do (${d.reason}).`);
+    const say = (x) => (x.action === "switch" ? `Switched from ${x.from} to ${x.to}.` : x.action === "stay" ? `Stays on ${x.from}: no account has room.` : `Nothing to do (${x.reason}).`);
+    print(d, d.orgs ? d.orgs.map((x) => `${x.org}: ${say(x)}`).join("\n") : say(d));
     return 0;
   }
   if ((verb !== "exclude" && verb !== "include") || positionals.length !== 2 || id === "default") throw usageError();

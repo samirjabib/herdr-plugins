@@ -51,6 +51,7 @@ import { FILES, claudeStateFile, cliPath, defaultConfigDir, orcaRoots, profilesH
 import { failure, readJson, rebuildContract, render, withLock, writeAtomic } from "./files.mjs";
 import { afterUse } from "./restart.mjs";
 import { forgetUsage } from "./usage.mjs";
+import { ORGS, effectiveActives, movedScopes, poolOf, readOrgActives, readProfiles, writeOrgActive } from "./orgs.mjs";
 
 const execFileP = promisify(execFile);
 
@@ -394,12 +395,43 @@ async function writeActive(target, onlyFrom) {
     // Orca refuses a saved account whose folder holds no login; here one that
     // holds someone else's too (D17).
     if (!account.isDefault && (!account.signedIn || account.signedInAs)) throw failure(NEEDS_SIGN_IN, 5);
+    const rows = await readProfiles();
+    const before = rows ? effectiveActives({ known, rows, orgDirs: await readOrgActives(home) }) : null;
     const next = account.configDir ?? "";
-    if (next !== known.activeConfigDir) {
-      await writeAtomic(pathOf(home, FILES.active), next);
-      await rebuildContract(home);
-    }
-    return { from: known.active, to: account.id };
+    if (next !== known.activeConfigDir) await writeAtomic(pathOf(home, FILES.active), next);
+    // Chosen by hand: every org whose pool has it starts on it too.
+    if (rows) for (const org of ORGS) if (poolOf(org, known.accounts, rows).has(account.id)) await writeOrgActive(home, org, account);
+    await rebuildContract(home);
+    return { from: known.active, to: account.id, scopes: await scopesAfter(home, rows, before, known.active, account.id) };
+  });
+}
+
+// The scopes (orgs, "none") whose Claudes went from `from` to `to`, or
+// undefined without pools (every terminal counts, as before).
+async function scopesAfter(home, rows, before, from, to) {
+  if (!rows) return undefined;
+  const after = effectiveActives({ known: await knownAccounts(home), rows, orgDirs: await readOrgActives(home) });
+  return [...movedScopes(before, after, from, to)];
+}
+
+// The automatic switch of one org (S1): its active file goes to `target`
+// when its account is still `onlyFrom`, and so does the global `active`
+// when it is that account too (orgs with no file of their own follow it).
+// Returns { from, to, scopes }; from === to when another run moved it first.
+async function writeOrgActiveGuarded(org, target, onlyFrom) {
+  const home = stateHome();
+  return withLock(home, async () => {
+    const known = await knownAccounts(home);
+    const rows = (await readProfiles()) ?? [];
+    const before = effectiveActives({ known, rows, orgDirs: await readOrgActives(home) });
+    if (before[org] !== onlyFrom) return { from: before[org], to: before[org] };
+    const account = known.accounts.find((a) => a.id === target);
+    if (!account) throw unknownAccount(target);
+    if (!account.isDefault && (!account.signedIn || account.signedInAs)) throw failure(NEEDS_SIGN_IN, 5);
+    await writeOrgActive(home, org, account);
+    if (known.active === onlyFrom) await writeAtomic(pathOf(home, FILES.active), account.configDir ?? "");
+    await rebuildContract(home);
+    return { from: onlyFrom, to: target, scopes: await scopesAfter(home, rows, before, onlyFrom, target) };
   });
 }
 
@@ -413,11 +445,19 @@ function readUsageOf(id) {
 }
 
 export async function switchAccount(target, { onlyFrom } = {}) {
-  const { from, to } = await writeActive(target, onlyFrom);
+  const { from, to, scopes } = await writeActive(target, onlyFrom);
   if (from !== to) readUsageOf(to);
-  // The terminals still on `from` follow settings.switchMode (D8, T4).
-  if (from !== to) await afterUse(from, to);
+  // The terminals still on `from` follow settings.switchMode (D8, T4), only
+  // those whose org's account moved.
+  if (from !== to) await afterUse(from, to, { scopes });
   return { from, to };
+}
+
+export async function switchOrgAccount(org, target, { onlyFrom }) {
+  const { from, to, scopes } = await writeOrgActiveGuarded(org, target, onlyFrom);
+  if (from !== to) readUsageOf(to);
+  if (from !== to) await afterUse(from, to, { scopes });
+  return { from, to, scopes };
 }
 
 export async function use(args) {

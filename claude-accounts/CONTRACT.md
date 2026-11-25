@@ -175,7 +175,10 @@ read) is selected, as in Orca, and its card asks you to sign in again, while
 
 When the owner turns the automatic switch on, the plugin switches through
 this same path on its own (to a Max or Pro account only), so `active` can
-change without a click; read the file again rather than caching it.
+change without a click; read the file again rather than caching it. With
+mac-workspace's claude-profiles.tsv the switch runs per org, and each org's
+account is `active.<org>` in the state folder (RECIPE.md, "One active
+account per org"); `active` stays the account outside every org.
 
 ### `resume --terminal <t> --account <id|default> [--message <text>] [--wait <s>] --json`
 

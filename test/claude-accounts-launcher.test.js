@@ -289,3 +289,25 @@ test("outside Herdr a pinned group changes nothing", async (t) => {
   const cwd = await workspace(s, "cs/shop/main");
   assert.match(run(s, { CLAUDE_CONFIG_DIR: "/mine" }, [], undefined, cwd).out, /^dir=\/mine$/m);
 });
+
+// One active account per org (odd/tasks/autoswitch-orgs.md S1): active.<group>
+// in the state folder, the active file's format, read by the folder's group.
+test("an org's active.<group> file wins over the global active file in that group's folders only; a switch's CLAUDE_ACCOUNTS_DIR still wins", async (t) => {
+  const s = await sandbox(t, { active: "/profiles/a/home\n" });
+  await writeFile(join(s.home, ".config/herdr-app/claude-accounts/active.ag"), "/profiles/ag2/home\n");
+  await writeFile(join(s.home, ".config/herdr-app/claude-accounts/active.personal"), "");
+  const ag = await workspace(s, "ag/shop/main/src");
+  assert.match(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, ag).out, /^dir=\/profiles\/ag2\/home$/m);
+  assert.match(run(s, { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_DIR: "/profiles/b/home" }, [], undefined, ag).out, /^dir=\/profiles\/b\/home$/m);
+  // An empty org file is System default for that org.
+  const personal = await workspace(s, "personal/tool/main");
+  assert.match(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, personal).out, /^dir=<unset>$/m);
+  // cs has no file of its own: the global active file, as before.
+  const cs = await workspace(s, "cs/shop/main");
+  assert.match(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, cs).out, /^dir=\/profiles\/a\/home$/m);
+  // A pin still wins over the org's file.
+  const pin = join(s.home, "profiles/agpin");
+  await mkdir(pin, { recursive: true });
+  await pinned(s, `ag\t${pin}\n`);
+  assert.match(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, ag).out, new RegExp(`^dir=${pin}$`, "m"));
+});

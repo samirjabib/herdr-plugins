@@ -19,7 +19,7 @@
 //   2. <dir>/sessions/<foreground.pid>.json, searched over every config dir
 //      this Mac has (configDirs). The dir where it's found is the account.
 // Returns { terminal, kind, error, pid, foregroundPid, ownProgram, title,
-// app, state, argv, account, configDir, sessionId, session, agents }:
+// app, state, argv, account, configDir, sessionId, session, agents, cwd }:
 //   kind: "claude" (a session file was found), "noSession" (Claude runs but
 //   has no readable session file yet), "notClaude" (the shell or another
 //   program is in the foreground), "missing" (no such live terminal) or
@@ -29,7 +29,9 @@
 //   session: the session file's status word, "idle" or "busy";
 //   state: Herdr's .status.state ("idle", "working", "done", "blocked", …);
 //   agents: the titles of the subagents Herdr lists as working or blocked
-//   (.records, keyed by agent id): a restart stops them with Claude.
+//   (.records, keyed by agent id): a restart stops them with Claude;
+//   cwd: the foreground's current folder, else the launch folder (its org
+//   says which org's switch it follows, orgs.mjs).
 //
 // lastTurn(configDir, sessionId): whether the conversation's last turn is
 // over, read from the end of its transcript (Orca's isClaudePaneMidTurn
@@ -452,6 +454,7 @@ export async function inspectTerminal(t, known) {
     sessionId: null,
     session: null,
     agents: [],
+    cwd: null,
   };
   let info;
   try {
@@ -465,6 +468,7 @@ export async function inspectTerminal(t, known) {
   result.app = str(info.status?.app);
   result.state = str(info.status?.state);
   result.agents = runningAgents(info.records);
+  result.cwd = str(info.foreground?.cwd) ?? str(info.cwd);
   const fg = info.foreground;
   if (!fg || !Number.isInteger(fg.pid)) return { ...result, kind: "notClaude" };
   result.foregroundPid = fg.pid;
