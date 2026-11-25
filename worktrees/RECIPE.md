@@ -209,8 +209,8 @@ go to sleep and come back where they were.
   space freed.
 - **Buttons.** The switcher has "+ New worktree" and "Clean up…"; the create,
   remove and clean up dialogs have Cancel and their action. The keys still work.
-- **The layout** (`collie-sheeps`, "Collie Sheeps": Collie's sibling): Herdr's default with claude-accounts' usage
-  and agent-sleep's moon (its popup: Sleep now, Wake all, automatic sleep, off
+- **The layout** (`collie-sheeps`, "Collie Sheeps": Collie's sibling): Herdr's default with Herdr's own
+  `workspace-status` (Collie shows the Claude usage since local-39) and agent-sleep's moon (its popup: Sleep now, Wake all, automatic sleep, off
   until turned on) in the status bar, the sidebar's header and workspace switcher from `spaces-ws`,
   the Agents tree from `agents-tree`, pane headers from `pane-branch`, and the
   Files and Changes panels from `files-ws` and `changes-ws`. `requires`

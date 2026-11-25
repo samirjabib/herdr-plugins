@@ -1,5 +1,14 @@
 # Claude accounts
 
+> **Since local-39 (2026-11-25) Collie owns the Claude accounts UI.** No
+> layout of this repo draws the footer or status view any more: Collie lists
+> each org's accounts with their usage, signs one in (`login <id>` in a
+> Herdr terminal), turns the automatic switch on or off, and runs `usage
+> --json` every few minutes, which runs the automatic switch's check. This
+> plugin stays installed for its CLI and its launcher (`bin/claude`), which
+> Collie, the restarts and other plugins use. The views below still work in
+> a layout that places them.
+
 Orca's Claude usage and accounts, in Herdr. The sidebar footer shows how much
 of its session, weekly and Fable limits the active Claude account has used,
 and when each one resets. A popover and a panel show every account. Manage

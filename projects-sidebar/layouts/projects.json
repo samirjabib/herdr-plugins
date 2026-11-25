@@ -281,19 +281,6 @@
               }
             },
             {
-              "id": "status-usage",
-              "type": "block",
-              "size": {
-                "weight": 1
-              },
-              "content": {
-                "mod": "claude-accounts",
-                "props": {
-                  "view": "footer"
-                }
-              }
-            },
-            {
               "id": "status-keep-awake",
               "type": "block",
               "size": {

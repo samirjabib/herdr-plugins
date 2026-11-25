@@ -581,8 +581,7 @@ across repos.
   `sidebar-lists` and `sidebar-footer`. The status bar (`status`, px 28)
   is a row: `workspace-status` (weight 1), then `{ "mod": "spotlight",
   "props": { "view": "footer" } }` (px 40, the spotlight plugin's test-queue
-  flask), then `{ "mod": "claude-accounts", "props": { "view": "footer" } }`
-  (weight 1), Claude's usage at its right as in Orca, and last
+  flask), then keep-awake's cup, and last
   `status-agent-sleep` → `{ "mod": "agent-sleep" }` (px 40): the agent-sleep
   plugin's moon, which must be in the shown layout for its loop to run. The
   row's first cell is `status-projects-keeper` → `{ "mod": "projects",

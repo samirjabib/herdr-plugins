@@ -1,6 +1,7 @@
 # Plugin folders of this repo that scripts/install.sh installs first.
-# The layout's status bar draws claude-accounts' and spotlight's footers;
-# without one, its block shows "<mod> did not load".
+# The layout's status bar draws spotlight's footer; without it, its block
+# shows "<mod> did not load". claude-accounts brings its CLI and launcher
+# (Collie shows the accounts; no layout draws the usage since local-39).
 claude-accounts
 spotlight
 # The status bar's last cell, the moon, runs the agent-sleep plugin's loop. It

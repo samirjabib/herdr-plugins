@@ -57,7 +57,7 @@ test("projects layout: agent-sleep's moon is the status bar's last cell, nothing
   assert.ok(requires.split("\n").includes("agent-sleep"));
 });
 
-test("projects layout: the status bar is a row, the projects keeper's 1 px cell, workspace-status, the spotlight flask, the claude-accounts footer, keep-awake's cup, then agent-sleep's moon (workspace-sleep D7, claude-accounts D10, spotlight D20, keep-awake D10, agent-sleep D14)", () => {
+test("projects layout: the status bar is a row, the projects keeper's 1 px cell, workspace-status, the spotlight flask, keep-awake's cup, then agent-sleep's moon; no claude-accounts usage since Collie owns accounts (local-39) (workspace-sleep D7, spotlight D20, keep-awake D10, agent-sleep D14)", () => {
   const status = find(read("layouts/projects.json"), "status");
   assert.equal(status.type, "row");
   assert.equal(status.resizable, false);
@@ -66,7 +66,6 @@ test("projects layout: the status bar is a row, the projects keeper's 1 px cell,
     { id: "status-projects-keeper", type: "block", size: { px: 1 }, content: { mod: "projects", props: { view: "keeper" } } },
     { id: "status-workspace", type: "block", size: { weight: 1 }, content: { mod: "workspace-status" } },
     { id: "status-spotlight", type: "block", size: { px: 40 }, content: { mod: "spotlight", props: { view: "footer" } } },
-    { id: "status-usage", type: "block", size: { weight: 1 }, content: { mod: "claude-accounts", props: { view: "footer" } } },
     { id: "status-keep-awake", type: "block", size: { px: 64 }, content: { mod: "keep-awake" } },
     { id: "status-agent-sleep", type: "block", size: { px: 40 }, content: { mod: "agent-sleep" } },
   ]);

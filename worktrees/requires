@@ -1,5 +1,6 @@
 # Plugin folders of this repo that scripts/install.sh installs first.
-# The collie-sheeps layout's status bar draws claude-accounts' usage.
+# claude-accounts: its CLI and launcher (Collie shows the accounts and runs the poll;
+# no layout draws the usage since local-39).
 claude-accounts
 # Agent sleep: the status bar's moon and the space menu's Sleep agents.
 agent-sleep

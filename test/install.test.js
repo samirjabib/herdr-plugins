@@ -468,7 +468,7 @@ test("spotlight puts its CLI on PATH as ~/.local/bin/spotlight: it runs through 
   assert.equal(existsSync(join(home, "mods/spotlight")), false);
 });
 
-test("projects-sidebar requires spotlight: it lands first, with its command, and the installed layout draws its footer between workspace-status and claude-accounts (D20)", () => {
+test("projects-sidebar requires spotlight: it lands first, with its command, and the installed layout draws its footer after workspace-status (D20)", () => {
   const home = fakeHome();
   const r = run(INSTALL, home, "--no-keys");
   assert.equal(r.status, 0, r.stderr);
@@ -481,7 +481,7 @@ test("projects-sidebar requires spotlight: it lands first, with its command, and
   const status = find(JSON.parse(readFileSync(join(home, "layouts/projects.json"), "utf8")), "status");
   assert.deepEqual(
     status.children.map((c) => c.id),
-    ["status-projects-keeper", "status-workspace", "status-spotlight", "status-usage", "status-keep-awake", "status-agent-sleep"],
+    ["status-projects-keeper", "status-workspace", "status-spotlight", "status-keep-awake", "status-agent-sleep"],
   );
   assert.deepEqual(status.children.find((c) => c.id === "status-spotlight"), {
     id: "status-spotlight",
