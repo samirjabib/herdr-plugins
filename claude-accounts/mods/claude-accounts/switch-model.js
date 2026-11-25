@@ -77,7 +77,7 @@ export function autoSwitchSetting(settings) {
 
 export const AUTO_SWITCH_FILE = "auto-switch.json";
 const STATES = ["switched", "stuck"];
-const WINDOW_NAMES = { session: "5-hour", weekly: "weekly" };
+const WINDOW_NAMES = { session: "5-hour", weekly: "weekly", monthly: "monthly spend" };
 
 // { state, from, to, at, window, percent, resetsAt }, or null for no file,
 // junk or a state this doesn't know. A switched record needs its `to`.

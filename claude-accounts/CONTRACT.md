@@ -64,7 +64,10 @@ change without notice.
 
 The windows: `session` is the 5-hour limit, `weekly` the 7-day limit on all
 models, `fable` the weekly Fable limit, and `monthly` the monthly spend
-limit. When a folder's login changes (System default's too), its windows
+limit. `monthly` is 100 with no reset whenever the org's monthly spend limit
+is reached (the endpoint's `extra_usage.spend_limit_reached`), plan windows
+or not: Claude refuses every turn there, and the automatic switch moves off
+it whatever its plan. When a folder's login changes (System default's too), its windows
 empty until it's read again: no number survives from the old login.
 
 ### Each usage window

@@ -376,6 +376,20 @@ test("credits and the monthly spend window (claude-usage-credits.ts): spend befo
   assert.deepEqual(parseUsageResponse({ spend: { used: { amount_minor: 5 } }, extra_usage: { utilization: 50 } }), { usage: empty, credits: null });
 });
 
+test("the org's monthly spend limit: extra_usage.spend_limit_reached fills the monthly window, plan windows or not", async () => {
+  const { parseUsageResponse } = await cliModule("usage");
+  // A Team seat whose org turned extra usage off at its cap (the endpoint's shape, 2026-11-25).
+  const blocked = parseUsageResponse({
+    limits: [{ kind: "session", percent: 40 }, { kind: "weekly_all", percent: 91 }],
+    spend: { used: { amount_minor: 0, exponent: 2 }, limit: null, percent: 0, enabled: false, disabled_reason: "org_level_disabled_until" },
+    extra_usage: { is_enabled: false, monthly_limit: null, disabled_reason: "org_level_disabled_until", spend_limit_reached: true },
+  });
+  assert.deepEqual(blocked.usage.monthly, win(100, null));
+  assert.equal(blocked.usage.weekly.percent, 91, "the plan windows stay");
+  const open = parseUsageResponse({ limits: [{ kind: "session", percent: 40 }], extra_usage: { spend_limit_reached: false } });
+  assert.equal(open.usage.monthly, null, "not reached: no window");
+});
+
 // ── The usage command ──────────────────────────────────────────────────────
 // Each case has its own sandbox and endpoint, so they run side by side: the
 // slow ones (a `security` that hangs, the 15 s answer) overlap the rest.

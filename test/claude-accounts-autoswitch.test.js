@@ -142,6 +142,20 @@ test("S2: a pay-per-use active account, System default and the same login are ne
   assert.equal(pickAutoSwitch(docOf("m1", acct("m1", "Max", 99, 0), twin), { now: NOW }).action, "stay", "the same login isn't another account");
 });
 
+test("S2: an account at its org's monthly spend limit moves off whatever its plan, and is never a target", () => {
+  const spent = (a) => ({ ...a, usage: { ...a.usage, monthly: { percent: 100, resetsAt: null } } });
+  // samir@coldsmoke.co: a Team seat under its plan windows, blocked by the org's spend limit.
+  const team = spent(acct("team", "Team", 40, 91));
+  const d = pickAutoSwitch(docOf("team", team, acct("m1", "Max", 10, 20)), { now: NOW });
+  assert.deepEqual([d.action, d.to, d.window, d.percent], ["switch", "m1", "monthly", 100]);
+  const max = spent(acct("m1", "Max", 10, 20));
+  assert.equal(pickAutoSwitch(docOf("m1", max, acct("m2", "Max", 50, 50)), { now: NOW }).to, "m2", "a Max at the limit moves too");
+  const full = pickAutoSwitch(docOf("m1", acct("m1", "Max", 99, 0), spent(acct("m2", "Max", 0, 0))), { now: NOW });
+  assert.equal(full.action, "stay", "a spend-limited account has no room");
+  // Under its limit a Team or Enterprise account still stays where the owner put it.
+  assert.equal(pickAutoSwitch(docOf("team", acct("team", "Team", 99, 99), acct("m1", "Max", 0, 0)), { now: NOW }).action, "none");
+});
+
 test("S2: the active saved account borrows System default's fresher numbers for the same login, as the footer shows them", () => {
   const stale = acct("m1", "Max", 10, 10, { usageUpdatedAt: NOW - 2 * HOUR });
   const def = acct("default", "Max", 97, 10, { isDefault: true, configDir: null, duplicateOf: "m1" });

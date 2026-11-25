@@ -1,6 +1,7 @@
 // The automatic switch (odd/tasks/claude-accounts-switching.md S1, S2): when
 // the active account reaches the switch line on its 5-hour or weekly window,
-// the next Claude starts on the eligible account with the most room left.
+// or its org's monthly spend limit (usage.monthly at 100), the next Claude
+// starts on the eligible account with the most room left.
 //
 //   auto-switch check                 runs the check now, prints its decision
 //   auto-switch exclude|include <id>  keeps a saved account out of it, or back in
@@ -16,7 +17,8 @@
 //   { action: "stay", from, window, percent, resetsAt }   at the line, and no
 //                                                          eligible account has room
 // Only an active subscription account moves (one chosen by hand that is pay
-// per use stays where the owner put it). System default (the Mac's own login,
+// per use stays where the owner put it), except one at its org's monthly
+// spend limit, whatever its plan: Claude refuses every turn there. System default (the Mac's own login,
 // hidden from the lists) and an account of the same login are never targets.
 // A window past its reset is null in the contract: it counts as 0, so an
 // account that was full comes back once its window resets, never before. The
@@ -51,7 +53,7 @@ export const SWITCH_LINE = 95;
 // polls without a read is stale.
 export const FRESH_MS = 30 * 60_000;
 const FUTURE_SKEW_MS = 60_000;
-const WINDOWS = ["session", "weekly"];
+const WINDOWS = ["session", "weekly", "monthly"];
 
 const isNumber = (v) => typeof v === "number" && Number.isFinite(v);
 
@@ -82,7 +84,10 @@ function withoutPastWindows(a, now) {
   return { ...a, usage };
 }
 
-// The most used of its 5-hour and weekly windows: { window, percent, resetsAt }.
+// At its org's monthly spend limit: Claude refuses every turn until it resets.
+const atSpendLimit = (a) => isNumber(a?.usage?.monthly?.percent) && a.usage.monthly.percent >= 100;
+
+// The most used of its 5-hour, weekly and monthly windows: { window, percent, resetsAt }.
 function tightest(a) {
   let best = { window: "session", percent: 0, resetsAt: null };
   for (const key of WINDOWS) {
@@ -109,7 +114,7 @@ export function pickAutoSwitch(doc, { now = Date.now(), line = SWITCH_LINE, excl
   const def = accounts.find((a) => a.isDefault) ?? null;
   const active = withSameLogin(accounts.find((a) => a.id === doc?.active) ?? null, def, now);
   if (!active) return { action: "none", reason: "noActive" };
-  if (!isSubscription(active.plan)) return { action: "none", reason: "notSubscription" };
+  if (!isSubscription(active.plan) && !atSpendLimit(active)) return { action: "none", reason: "notSubscription" };
   if (!isFresh(active, now)) return { action: "none", reason: "stale" };
   const full = tightest(active);
   if (full.percent < line) return { action: "none", reason: "underLine" };
