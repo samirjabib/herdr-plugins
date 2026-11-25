@@ -677,6 +677,59 @@ esac
   assert.deepEqual([pending.from, pending.to], ["default", P1]);
   assert.deepEqual(pending.sessions.map((x) => [x.terminal, x.group]), [["t10h", "onAccount"]]);
   assert.deepEqual(JSON.parse(s.read("auto-switch.json")).org, "personal");
+  // Answered (the question is gone): the next poll asks again, in words.
+  rmSync(join(s.state, "pending-switch.json"));
   const human = s.cli(["auto-switch", "check"]);
   assert.match(human.stdout, new RegExp(`^t10h: moves from default to ${P1} \\(weekly at 100%\\)\\.$`, "m"));
+});
+
+// A fake Herdr with one Claude terminal (t10h, pid 4242) in ~/mac-workspace/personal whose
+// session file lives in `dir` (the account's folder).
+function claudeIn(s, dir) {
+  const sid = "3da9c849-6697-4058-b204-6d1a2711c6f0";
+  mkdirSync(join(dir, "sessions"), { recursive: true });
+  writeFileSync(join(dir, "sessions", "4242.json"), JSON.stringify({ sessionId: sid, status: "idle" }));
+  mkdirSync(join(dir, "projects", "x"), { recursive: true });
+  writeFileSync(join(dir, "projects", "x", `${sid}.jsonl`), "{}\n");
+  const cwd = join(s.box, "ws", "personal");
+  mkdirSync(cwd, { recursive: true });
+  const get = JSON.stringify({ state: "live", pid: 4000, title: "orch-personal", foreground: { pid: 4242, name: "claude", argv: ["claude"], cwd } });
+  writeFileSync(join(s.box, "bin", "hc"), `#!/bin/sh
+case "$1" in
+  ls) echo '{"terminals":[{"address":"t10h","state":"live","agent":"claude-code","where":"orch"}]}' ;;
+  get) echo '${get}' ;;
+  *) exit 1 ;;
+esac
+`);
+}
+
+test("local-39 review: a check that switched an org leaves that switch's terminals to it: no second move in the same poll", () => {
+  const s = sandbox({ workspace: true });
+  const dirs = accounts(s, [{ id: P1, type: MAX, session: 97, weekly: 30 }, { id: AG1, type: MAX, session: 10, weekly: 10 }], P1);
+  orgRows(s, [["ag", "ag", dirs[AG1], "yes"], ["p", "personal", dirs[P1], "yes"]]);
+  claudeIn(s, dirs[P1]);
+  s.cli(["settings", "set", "autoSwitch", "on"]);
+  s.cli(["settings", "set", "switchMode", "ask"]);
+  const d = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
+  assert.deepEqual([d.action, d.org ?? d.orgs.find((x) => x.action === "switch").org, d.to], ["switch", "personal", AG1]);
+  assert.equal(d.sessions, undefined, "the org switch's own afterUse moves t10h");
+});
+
+test("local-39 review: with switchMode keep no session moves; in ask mode the same question is not asked again every poll", () => {
+  const s = sandbox({ workspace: true });
+  const CS = "c5c5c5c5-5555-4555-8555-555555555555";
+  const dirs = accounts(s, [{ id: CS, type: MAX, session: 40, weekly: 100 }, { id: P1, type: MAX, session: 7, weekly: 43 }], P1);
+  writeFileSync(join(s.home, ".claude.json"), readFileSync(join(dirs[CS], ".claude.json")));
+  orgRows(s, [["cs", "cs", "~/.claude", "yes"], ["personal", "personal", dirs[P1], "yes"]]);
+  claudeIn(s, join(s.home, ".claude"));
+  s.cli(["settings", "set", "autoSwitch", "on"]);
+  s.cli(["settings", "set", "switchMode", "keep"]);
+  let d = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
+  assert.equal(d.sessions, undefined, "keep: nothing moves, nothing is said");
+  assert.equal(existsSync(join(s.state, "auto-switch.json")), false);
+  s.cli(["settings", "set", "switchMode", "ask"]);
+  d = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
+  assert.equal(d.sessions.length, 1);
+  d = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
+  assert.equal(d.sessions, undefined, "the pending question already asks it");
 });

@@ -232,6 +232,8 @@ export async function checkAutoSwitch(home = stateHome(), now = Date.now()) {
       if (from === to) return { action: "none", reason: "moved" };
     }
     await record(home, decision, now);
+    // The switch's own afterUse moves the full account's terminals: no second move this poll.
+    if (decision.action === "switch") return decision;
     const k = await knownAccounts(home);
     const sessions = await moveSessions(home, now, { known: k, actives: { none: k.active }, pinned: new Set() });
     return sessions.length > 0 ? { ...decision, sessions } : decision;
@@ -258,6 +260,7 @@ export async function checkAutoSwitch(home = stateHome(), now = Date.now()) {
     orgs.push({ org, ...decision });
   }
   const first = orgs.find((d) => d.action === "switch") ?? orgs.find((d) => d.action === "stay") ?? { action: "none", reason: "underLine" };
+  if (first.action === "switch") return { ...first, orgs };
   const k = await knownAccounts(home);
   const actives = effectiveActives({ known: k, rows, orgDirs: await readOrgActives(home) });
   const sessions = await moveSessions(home, now, { known: k, actives, pinned, scoped: true });
@@ -265,10 +268,33 @@ export async function checkAutoSwitch(home = stateHome(), now = Date.now()) {
 }
 
 // Restarts the sessions pickSessionMoves moves, through afterUse (the restart
-// setting applies: keep moves none, ask asks). Terminals are read only when
-// some account is at the line, so a quiet poll calls no hc. A failed read
-// leaves every session where it is.
-async function moveSessions(home, now, { known, actives, pinned, scoped = false }) {
+// setting applies): keep moves none and says nothing; ask asks once, not again
+// while pending-switch.json still asks the same; restart queues each terminal
+// once (afterUse keeps out one already heading there). It runs only on a poll
+// that switched no account, whose own afterUse moves its terminals. Terminals
+// are read only when some account is at the line, so a quiet poll calls no
+// hc. Any failure leaves every session where it is and the check's decision
+// stands.
+async function moveSessions(home, now, options) {
+  try {
+    return await tryMoveSessions(home, now, options);
+  } catch (e) {
+    process.stderr.write(`claude-accounts: auto-switch: sessions stay where they are (${e.message})\n`);
+    return [];
+  }
+}
+
+// Whether pending-switch.json already asks to move these terminals from → to.
+async function alreadyAsked(home, m) {
+  const pending = await readJson(join(home, FILES.pendingSwitch)).catch(() => null);
+  if (pending?.from !== m.from || pending?.to !== m.to || !Array.isArray(pending.sessions)) return false;
+  const asked = new Set(pending.sessions.filter((x) => x?.group === "onAccount").map((x) => x.terminal));
+  return m.terminals.every((t) => asked.has(t));
+}
+
+async function tryMoveSessions(home, now, { known, actives, pinned, scoped = false }) {
+  const { switchMode } = await readSettings(home);
+  if (switchMode === "keep") return [];
   const doc = await rebuildContract(home);
   if (!(doc.accounts ?? []).some((a) => atLine(a, now, SWITCH_LINE))) return [];
   let sessions;
@@ -281,8 +307,10 @@ async function moveSessions(home, now, { known, actives, pinned, scoped = false 
   } catch {
     return [];
   }
-  const moves = pickSessionMoves(doc, { sessions, actives, pinned, now });
-  for (const m of moves) {
+  const moves = [];
+  for (const m of pickSessionMoves(doc, { sessions, actives, pinned, now })) {
+    if (switchMode === "ask" && (await alreadyAsked(home, m))) continue;
+    moves.push(m);
     await afterUse(m.from, m.to, scoped ? { scopes: [m.org] } : {});
     await record(home, { action: "switch", from: m.from, to: m.to, window: m.window, percent: m.percent }, now, scoped ? m.org : undefined);
   }
