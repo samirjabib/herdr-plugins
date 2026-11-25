@@ -21,7 +21,7 @@
 // pools: readProfiles is null and everything stays global, as before.
 //
 // A terminal's org comes from its folder: the first part of its path under
-// ~/mac-workspace, when it is cs, ag or personal and the folder lies inside it.
+// ~/mac-workspace, when it is cs, ag or personal (the org folder itself too).
 
 import { readFile, realpath, rm } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -90,9 +90,11 @@ export async function orgOfCwd(cwd, env = process.env) {
   for (const r of roots) {
     for (const p of paths) {
       if (!p.startsWith(r + sep)) continue;
-      // Inside the org's folder, as the launcher reads it: <root>/<org>/<x>.
-      const [first, next] = p.slice(r.length + 1).split(sep);
-      if (ORGS.includes(first) && next) return first;
+      // The org's folder or anything inside it, as the launcher and
+      // mac-workspace's shim read it: <root>/<org>[/<x>] (an org's
+      // orchestrator runs in the org folder itself, local-39).
+      const [first] = p.slice(r.length + 1).split(sep);
+      if (ORGS.includes(first)) return first;
     }
   }
   return null;

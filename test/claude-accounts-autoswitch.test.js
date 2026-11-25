@@ -488,11 +488,14 @@ test("S1: the tsv's rows give each org its pool; personal is every listed accoun
   assert.deepEqual([...poolOf("personal", accounts, rows, env)], ["default", "a1", "a2"], "an unlisted folder is no one's");
 });
 
-test("S1: a terminal's org is the first folder under the workspace root; anything else has none", async () => {
+test("S1: a terminal's org is the first folder under the workspace root, the org folder itself included; anything else has none", async () => {
   const env = { CLAUDE_ACCOUNTS_WORKSPACE: "/no/such/ws" };
   assert.equal(await orgOfCwd("/no/such/ws/ag/shop/worktrees/x/src", env), "ag");
   assert.equal(await orgOfCwd("/no/such/ws/personal/herdr-plugins/main", env), "personal");
-  assert.equal(await orgOfCwd("/no/such/ws/cs", env), null, "the org folder itself runs no project");
+  // local-39: an org's orchestrator runs in the org folder itself, and the
+  // launcher and mac-workspace's shim run it on that org's account.
+  assert.equal(await orgOfCwd("/no/such/ws/cs", env), "cs", "the org folder itself is the org's");
+  assert.equal(await orgOfCwd("/no/such/ws/personal", env), "personal");
   assert.equal(await orgOfCwd("/no/such/ws/docs/x", env), null);
   assert.equal(await orgOfCwd("/no/such/wsx/ag/shop", env), null);
   assert.equal(await orgOfCwd(null, env), null);
@@ -600,4 +603,80 @@ test("S3: the toast of a per-org switch names the org; a global one reads as bef
   assert.equal(stuck.toast.title, "personal: a@example.com reached 99% of its weekly limit");
   const plain = autoSwitchToast(readAutoSwitch({ state: "switched", from: "a", to: "b", at: 1, window: "session", percent: 96 }), label);
   assert.equal(plain.toast.title, "Switched to b@example.com automatically");
+});
+
+// ── Sessions off their org's account (local-39) ────────────────────────────
+// Samir: 'no funciono el cambio entre cuentas automatico que paso'. A Claude
+// in ~/mac-workspace/personal ran on ~/.claude (System default, Coldsmoke's
+// login) at 100%, while personal's active account was under the line: the
+// check only looked at each org's active account, never at the account a
+// live session really runs on.
+
+const { pickSessionMoves } = await import(pathToFileURL(join(MOD, "cli/autoswitch.mjs")).href);
+
+test("local-39: a session on System default whose login is at its limit moves to its folder's org account; one under the line, on its org's account, or in a pinned org stays", () => {
+  const cs = acct("cs", "Team", null, 100, { usage: { session: null, weekly: w(100), fable: null, monthly: w(100) } });
+  const def = acct("default", "Team", null, null, { isDefault: true, duplicateOf: "cs", usageUpdatedAt: 0, error: "expired" });
+  const p = acct("p", "Max 5x", 7, 43);
+  const doc = docOf("p", def, cs, p);
+  const actives = { none: "p", cs: "cs", ag: null, personal: "p" };
+  const sessions = [
+    { terminal: "t10h", account: "default", org: "personal" },
+    { terminal: "t2", account: "p", org: "personal" },
+    { terminal: "t3", account: "default", org: "cs" },
+  ];
+  const moves = pickSessionMoves(doc, { sessions, actives, pinned: new Set(["cs"]), now: NOW });
+  assert.deepEqual(moves, [{ org: "personal", from: "default", to: "p", terminals: ["t10h"], window: "weekly", percent: 100 }]);
+  // Under the line: nothing moves.
+  const calm = docOf("p", def, acct("cs", "Team", null, 40), p);
+  assert.deepEqual(pickSessionMoves(calm, { sessions, actives, pinned: new Set(), now: NOW }), []);
+  // The org's account is full too: no move onto it.
+  const full = docOf("p", def, cs, acct("p", "Max 5x", 99, 43));
+  assert.deepEqual(pickSessionMoves(full, { sessions, actives, pinned: new Set(), now: NOW }), []);
+  // Outside every org a session follows the global account.
+  const out = pickSessionMoves(doc, { sessions: [{ terminal: "t9", account: "cs", org: null }], actives, pinned: new Set(), now: NOW });
+  assert.deepEqual(out.map((m) => [m.org, m.from, m.to]), [["none", "cs", "p"]]);
+});
+
+test("local-39: `auto-switch check` restarts a personal Claude running on ~/.claude when that login is at its limit, even though personal's account is under the line", () => {
+  const s = sandbox({ workspace: true });
+  const CS = "c5c5c5c5-5555-4555-8555-555555555555";
+  const dirs = accounts(s, [
+    { id: CS, type: MAX, session: 40, weekly: 100 },
+    { id: P1, type: MAX, session: 7, weekly: 43 },
+  ], P1);
+  // ~/.claude holds the CS login: System default is its duplicate.
+  const cs = JSON.parse(readFileSync(join(dirs[CS], ".claude.json"), "utf8"));
+  const system = join(s.home, ".claude");
+  mkdirSync(join(system, "sessions"), { recursive: true });
+  writeFileSync(join(s.home, ".claude.json"), JSON.stringify(cs));
+  const sid = "3da9c849-6697-4058-b204-6d1a2711c6f0";
+  writeFileSync(join(system, "sessions", "4242.json"), JSON.stringify({ sessionId: sid, status: "idle" }));
+  mkdirSync(join(system, "projects", "x"), { recursive: true });
+  writeFileSync(join(system, "projects", "x", `${sid}.jsonl`), "{}\n");
+  orgRows(s, [["cs", "cs", "~/.claude", "yes"], ["personal", "personal", dirs[P1], "yes"]]);
+  const cwd = join(s.box, "ws", "personal");
+  mkdirSync(cwd, { recursive: true });
+  // t10h: Claude (pid 4242) in ~/mac-workspace/personal.
+  const get = JSON.stringify({ state: "live", pid: 4000, title: "orch-personal", foreground: { pid: 4242, name: "claude", argv: ["claude"], cwd } });
+  writeFileSync(join(s.box, "bin", "hc"), `#!/bin/sh
+case "$1" in
+  ls) echo '{"terminals":[{"address":"t10h","state":"live","agent":"claude-code","where":"orch"}]}' ;;
+  get) echo '${get}' ;;
+  *) exit 1 ;;
+esac
+`);
+  s.cli(["settings", "set", "autoSwitch", "on"]);
+  s.cli(["settings", "set", "switchMode", "ask"]);
+  const check = s.cli(["auto-switch", "check", "--json"]);
+  assert.equal(check.status, 0, check.stderr);
+  const d = JSON.parse(check.stdout);
+  assert.deepEqual(d.orgs.find((x) => x.org === "personal").reason, "underLine", "personal's own account is fine");
+  assert.deepEqual(d.sessions, [{ org: "personal", from: "default", to: P1, terminals: ["t10h"], window: "weekly", percent: 100 }]);
+  const pending = JSON.parse(s.read("pending-switch.json"));
+  assert.deepEqual([pending.from, pending.to], ["default", P1]);
+  assert.deepEqual(pending.sessions.map((x) => [x.terminal, x.group]), [["t10h", "onAccount"]]);
+  assert.deepEqual(JSON.parse(s.read("auto-switch.json")).org, "personal");
+  const human = s.cli(["auto-switch", "check"]);
+  assert.match(human.stdout, new RegExp(`^t10h: moves from default to ${P1} \\(weekly at 100%\\)\\.$`, "m"));
 });

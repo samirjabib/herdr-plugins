@@ -39,14 +39,17 @@
 // org's active file, the global one when it was the full account, and only
 // the terminals of the orgs whose account moved restart. The record carries
 // `org`. The result is the first switch (else stay, else none) plus `orgs`,
-// every org's decision.
+// every org's decision, and `sessions` when some live Claude ran on a full
+// account that is no org's active one (pickSessionMoves, local-39).
 
 import { parseArgs } from "node:util";
 import { isAutoSwitchPlan, isSpendLimited } from "../plans.js";
 import { FILES, stateHome } from "./paths.mjs";
 import { failure, readJson, rebuildContract, render, withLock, writeAtomic } from "./files.mjs";
 import { knownAccounts, readSettings, sameEmail, switchAccount, switchOrgAccount } from "./accounts.mjs";
-import { ORGS, effectiveActives, pinnedOrgs, poolOf, readOrgActives, readProfiles } from "./orgs.mjs";
+import { ORGS, effectiveActives, orgOfCwd, pinnedOrgs, poolOf, readOrgActives, readProfiles } from "./orgs.mjs";
+import { afterUse } from "./restart.mjs";
+import { inspectTerminal, listClaudeTerminals } from "./terminals.mjs";
 import { join } from "node:path";
 
 export const SWITCH_LINE = 95;
@@ -168,6 +171,53 @@ export function pickOrgAutoSwitch(doc, { org, active, pool, ...options }) {
   return pickAutoSwitch({ ...doc, active, accounts }, options);
 }
 
+// Sessions off their org's account (local-39): a live Claude can run on an
+// account that is no org's active one (System default's ~/.claude, a login
+// started by hand), so the per-org check never sees it fill up. Each such
+// session whose account is at the line moves to the account its folder's
+// org runs on (actives[org], "none" outside the orgs), unless that org is
+// pinned or its account is at the line too. Numbers: the account's own,
+// System default's borrowed from the saved account of the same login when
+// its own aren't fresh. Within a window usage only grows, so numbers past
+// FRESH_MS still say "at the line" until their window resets.
+// sessions: [{ terminal, account, org }] → [{ org, from, to, terminals, window, percent }].
+//
+// atLine(a, now, line): the account's tightest window when it is at the line
+// or its spend limit, from any numbers it has (a window past its reset counts
+// as empty), else null.
+function atLine(a, now, line) {
+  if (!a || !isNumber(a.usageUpdatedAt) || a.usageUpdatedAt <= 0) return null;
+  const current = withoutPastWindows(a, now);
+  const t = tightest(current);
+  return t.percent >= line || atSpendLimit(current) ? t : null;
+}
+
+export function pickSessionMoves(doc, { sessions, actives, pinned = new Set(), now = Date.now(), line = SWITCH_LINE }) {
+  const accounts = Array.isArray(doc?.accounts) ? doc.accounts : [];
+  const def = accounts.find((a) => a.isDefault) ?? null;
+  const byId = (id) => accounts.find((a) => a.id === id) ?? null;
+  const loginOf = (id) => {
+    if (id !== "default" || !def) return byId(id);
+    if (isFresh(def, now)) return def;
+    return byId(def.duplicateOf) ?? accounts.find((a) => !a.isDefault && sameLogin(a, def)) ?? def;
+  };
+  const sameAccount = (from, to) => from === to || (from === "default" && def?.duplicateOf === to);
+  const full = (a) => atLine(a, now, line);
+  const moves = new Map();
+  for (const s of sessions) {
+    const org = s.org ?? "none";
+    const to = actives[org];
+    if (!s.account || !to || pinned.has(org) || sameAccount(s.account, to)) continue;
+    const at = full(loginOf(s.account));
+    if (!at || full(loginOf(to))) continue;
+    const key = `${org}\t${s.account}\t${to}`;
+    const m = moves.get(key) ?? { org, from: s.account, to, terminals: [], window: at.window, percent: at.percent };
+    m.terminals.push(s.terminal);
+    moves.set(key, m);
+  }
+  return [...moves.values()];
+}
+
 export async function checkAutoSwitch(home = stateHome(), now = Date.now()) {
   const { autoSwitch } = await readSettings(home);
   if (autoSwitch !== "on") return { action: "none", reason: "off" };
@@ -182,7 +232,9 @@ export async function checkAutoSwitch(home = stateHome(), now = Date.now()) {
       if (from === to) return { action: "none", reason: "moved" };
     }
     await record(home, decision, now);
-    return decision;
+    const k = await knownAccounts(home);
+    const sessions = await moveSessions(home, now, { known: k, actives: { none: k.active }, pinned: new Set() });
+    return sessions.length > 0 ? { ...decision, sessions } : decision;
   }
   // One org at a time, each on its own active account and its own pool. An
   // org a switch moved already (it followed the global active) reads its new
@@ -206,7 +258,35 @@ export async function checkAutoSwitch(home = stateHome(), now = Date.now()) {
     orgs.push({ org, ...decision });
   }
   const first = orgs.find((d) => d.action === "switch") ?? orgs.find((d) => d.action === "stay") ?? { action: "none", reason: "underLine" };
-  return { ...first, orgs };
+  const k = await knownAccounts(home);
+  const actives = effectiveActives({ known: k, rows, orgDirs: await readOrgActives(home) });
+  const sessions = await moveSessions(home, now, { known: k, actives, pinned, scoped: true });
+  return { ...first, orgs, ...(sessions.length > 0 ? { sessions } : {}) };
+}
+
+// Restarts the sessions pickSessionMoves moves, through afterUse (the restart
+// setting applies: keep moves none, ask asks). Terminals are read only when
+// some account is at the line, so a quiet poll calls no hc. A failed read
+// leaves every session where it is.
+async function moveSessions(home, now, { known, actives, pinned, scoped = false }) {
+  const doc = await rebuildContract(home);
+  if (!(doc.accounts ?? []).some((a) => atLine(a, now, SWITCH_LINE))) return [];
+  let sessions;
+  try {
+    const listed = await listClaudeTerminals();
+    sessions = await Promise.all(listed.map(async ({ terminal }) => {
+      const found = await inspectTerminal(terminal, known);
+      return { terminal, account: found.kind === "claude" ? found.account : null, org: await orgOfCwd(found.cwd) };
+    }));
+  } catch {
+    return [];
+  }
+  const moves = pickSessionMoves(doc, { sessions, actives, pinned, now });
+  for (const m of moves) {
+    await afterUse(m.from, m.to, scoped ? { scopes: [m.org] } : {});
+    await record(home, { action: "switch", from: m.from, to: m.to, window: m.window, percent: m.percent }, now, scoped ? m.org : undefined);
+  }
+  return moves;
 }
 
 // ── auto-switch ─────────────────────────────────────────────────────────────
@@ -220,7 +300,8 @@ export async function autoSwitchCommand(args) {
   if (verb === "check" && positionals.length === 1) {
     const d = await checkAutoSwitch();
     const say = (x) => (x.action === "switch" ? `Switched from ${x.from} to ${x.to}.` : x.action === "stay" ? `Stays on ${x.from}: no account has room.` : `Nothing to do (${x.reason}).`);
-    print(d, d.orgs ? d.orgs.map((x) => `${x.org}: ${say(x)}`).join("\n") : say(d));
+    const moved = (d.sessions ?? []).map((m) => `${m.terminals.join(", ")}: moves from ${m.from} to ${m.to} (${m.window} at ${m.percent}%).`);
+    print(d, [d.orgs ? d.orgs.map((x) => `${x.org}: ${say(x)}`).join("\n") : say(d), ...moved].join("\n"));
     return 0;
   }
   if ((verb !== "exclude" && verb !== "include") || positionals.length !== 2 || id === "default") throw usageError();

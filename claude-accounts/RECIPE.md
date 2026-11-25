@@ -201,6 +201,12 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
     org and the orgs with no file of their own. A pinned org
     (`group-accounts`) never switches. `auto-switch.json` names the org, and
     so does the toast ("ag switched to … automatically").
+  - A Claude running on an account that is no org's active one (System
+    default's `~/.claude`, a `/login` by hand) is checked too: when that
+    login is at the line or its spend limit, the terminal restarts on its
+    folder's org account (the org folder itself counts, where an org's
+    orchestrator runs), unless that org is pinned or its account is full
+    too. `auto-switch check` lists those moves (`sessions` in `--json`).
   - Choosing an account by hand sets the global `active` and the file of
     every org whose pool has it; the other orgs stay where they are.
   - Without the tsv everything stays global, as before.
