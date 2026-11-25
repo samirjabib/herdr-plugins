@@ -304,7 +304,7 @@ test("import-orca again: new Orca accounts and fresh metadata come in; active, s
   assert.deepEqual(JSON.parse(s.read("settings.json")), { switchMode: "keep" }, "not reseeded");
 });
 
-test("list names each login's plan from its oauthAccount: Max 5x, Max 20x, Enterprise, Pro, Team; none without one", () => {
+test("list names each login's plan from its oauthAccount: Max 5x, Max 20x, Enterprise, Pro, Team; an unknown one by its raw name; none without one", () => {
   const s = sandbox();
   const plans = [
     [{ organizationType: "claude_max", organizationRateLimitTier: "default_claude_max_5x" }, "Max 5x"],
@@ -313,7 +313,7 @@ test("list names each login's plan from its oauthAccount: Max 5x, Max 20x, Enter
     [{ organizationType: "claude_enterprise", organizationRateLimitTier: "default_raven_enterprise" }, "Enterprise"],
     [{ organizationType: "claude_pro" }, "Pro"],
     [{ organizationType: "claude_team" }, "Team"],
-    [{ organizationType: "something_new" }, null],
+    [{ organizationType: "something_new" }, "something_new"],
     [{}, null],
   ];
   const rows = plans.map(([extra], i) => {

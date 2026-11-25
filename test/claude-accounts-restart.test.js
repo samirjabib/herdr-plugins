@@ -52,6 +52,8 @@ const root = realpathSync(mkdtempSync(join(tmpdir(), "claude-accounts-t4-")));
 const MOD = join(root, "mod");
 cpSync(join(SRC, "cli"), join(MOD, "cli"), { recursive: true });
 cpSync(join(SRC, "bin"), join(MOD, "bin"), { recursive: true });
+// The CLI's plan table (cli/accounts.mjs and autoswitch.mjs import ../plans.js).
+cpSync(join(SRC, "plans.js"), join(MOD, "plans.js"));
 const BIN = join(MOD, "bin/claude-accounts");
 chmodSync(BIN, 0o755);
 

@@ -110,7 +110,7 @@ const WINDOWS = Object.freeze([
 ]);
 
 const LOADING = "Loading usage…";
-// S5: an Enterprise or Team login is billed per use through the API: its
+// S5: a pay-per-use login (plans.js billsPerUse: no 5h or weekly window): its
 // windows (a "0% used 30d") say nothing, so it shows this instead of numbers.
 const API_USAGE = "API usage";
 // Never a number for it: one that needs signing in says that instead.

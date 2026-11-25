@@ -324,13 +324,15 @@ test("existing behavior holds: `use` still switches by hand (Enterprise too) and
 
 const ANA = "1b9d6bcd-bbfd-4b2d-9b5d-ab8dfbbd4bed";
 const BEN = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
-function fixtureDoc(plans) {
+// usageBased: the ids whose usage has no 5-hour or weekly window (a
+// usage-based Enterprise or Team login, plans.js billsPerUse).
+function fixtureDoc(plans, usageBased = []) {
   const raw = JSON.parse(fixture("accounts.v1.json"));
-  raw.accounts = raw.accounts.map((a) => ({ ...a, plan: plans[a.id] ?? null }));
+  raw.accounts = raw.accounts.map((a) => ({ ...a, plan: plans[a.id] ?? null, ...(usageBased.includes(a.id) ? { usage: { session: null, weekly: null, fable: null, monthly: null } } : {}) }));
   return readAccounts(JSON.stringify(raw));
 }
 
-test("S3: Enterprise and Team are pay per use; Max, Pro and no plan aren't", () => {
+test("S3: Enterprise and Team with no 5h or weekly window are pay per use; Max, Pro and no plan aren't", () => {
   assert.equal(PAY_PER_USE_TAG, "API · pay per use");
   for (const plan of ["Enterprise", "Team"]) assert.equal(isPayPerUse({ plan }), true, plan);
   for (const plan of ["Max 5x", "Max", "Pro", null]) assert.equal(isPayPerUse({ plan }), false, String(plan));
@@ -338,7 +340,7 @@ test("S3: Enterprise and Team are pay per use; Max, Pro and no plan aren't", () 
 });
 
 test("S3: Manage Accounts tags a pay-per-use row after its plan, and the panel's row has the tag", () => {
-  const doc = fixtureDoc({ [ANA]: "Max 5x", [BEN]: "Enterprise" });
+  const doc = fixtureDoc({ [ANA]: "Max 5x", [BEN]: "Enterprise" }, [BEN]);
   const m = accountsModel({ accounts: doc, settings: readSettings(fixture("settings.json")) });
   assert.deepEqual(m.rows.map((r) => r.badges), [["Max 5x", "This device", "Active"], ["Enterprise", "API · pay per use", "This device"]]);
   const p = panelModel({ doc, now: NOW });
@@ -411,7 +413,7 @@ test("S2: the footer says an automatic switch, and that none had room, once each
 // ── S5: a pay-per-use account shows "API usage", never percentages ─────────
 
 test("S5: a pay-per-use row in the panel has no bars, just API usage; a Max row keeps its bars", () => {
-  const doc = fixtureDoc({ [BEN]: "Enterprise" });
+  const doc = fixtureDoc({ [BEN]: "Enterprise" }, [BEN]);
   const ben = panelModel({ doc, now: NOW }).rows.find((r) => r.id === BEN);
   assert.deepEqual([ben.bars, ben.status], [[], "API usage"]);
   const max = panelModel({ doc: fixtureDoc({ [BEN]: "Max 5x" }), now: NOW }).rows.find((r) => r.id === BEN);

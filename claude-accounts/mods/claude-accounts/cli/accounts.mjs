@@ -40,6 +40,7 @@
 // account. Returns { from, to }.
 
 import { execFile, spawn } from "node:child_process";
+import { planOf } from "../plans.js";
 import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
@@ -133,16 +134,8 @@ const isDir = (path) => {
   }
 };
 
-// The plan a login's oauthAccount names, for people: "Max 5x", "Enterprise",
-// or null for a type this doesn't know. Claude writes organizationType
-// (claude_max, claude_enterprise, …) and, for Max, the tier in
-// organizationRateLimitTier (default_claude_max_5x, …_20x).
-const PLANS = { claude_enterprise: "Enterprise", claude_team: "Team", claude_pro: "Pro", claude_max: "Max" };
-function planOf(account) {
-  const plan = PLANS[text(account?.organizationType)] ?? null;
-  const tier = /_(\d+x)$/.exec(text(account?.organizationRateLimitTier) ?? "");
-  return plan === "Max" && tier ? `Max ${tier[1]}` : plan;
-}
+// The plan a login's oauthAccount names, for people (plans.js planOf): "Max
+// 5x", "Team Premium", a type the table doesn't know by its raw name, or null.
 
 // The login a config dir's .claude.json names (System default's for null):
 // { email, org, orgUuid, plan }, or null when there's none or it can't be read.

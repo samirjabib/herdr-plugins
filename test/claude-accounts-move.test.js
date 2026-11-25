@@ -49,9 +49,11 @@ const ON_ANA = { account: ANA, sessionId: "s-1", status: "idle", resumable: true
 
 // ── S3's rule, for this action ───────────────────────────────────────────────
 
-test("isPayPerUse: Enterprise and Team are billed per use; Max, Pro, no plan or no account aren't", () => {
-  for (const plan of ["Enterprise", "Team"]) assert.equal(isPayPerUse({ plan }), true, plan);
-  for (const plan of ["Max 5x", "Max 20x", "Max", "Pro", null, undefined, "", "enterprise "]) assert.equal(isPayPerUse({ plan }), false, String(plan));
+test("isPayPerUse: Enterprise, Team or an unknown plan with no 5h or weekly window is billed per use; with one, or Max, Pro, no plan or no account, isn't", () => {
+  for (const plan of ["Enterprise", "Team", "enterprise "]) assert.equal(isPayPerUse({ plan }), true, plan);
+  const windows = { session: { percent: 10, resetsAt: null }, weekly: null };
+  for (const plan of ["Enterprise", "Team", "enterprise "]) assert.equal(isPayPerUse({ plan, usage: windows }), false, `${plan} with windows`);
+  for (const plan of ["Max 5x", "Max 20x", "Max", "Pro", null, undefined, ""]) assert.equal(isPayPerUse({ plan }), false, String(plan));
   assert.equal(isPayPerUse(null), false);
   assert.equal(isPayPerUse(undefined), false);
 });
