@@ -42,6 +42,7 @@
 import { formatPercent, formatDuration, formatResetsIn, formatUpdated, colorToken, errorCopy, densityLevel } from "./format.js";
 import { MOD, readRestart, readPendingSwitch, readLoginLink } from "./store.js";
 import { PAY_PER_USE_TAG, isPayPerUse, readAutoSwitch } from "./switch-model.js";
+import { SPEND_LIMIT, isSpendLimited } from "./plans.js";
 
 const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const isNumber = (v) => typeof v === "number" && Number.isFinite(v);
@@ -110,11 +111,16 @@ const WINDOWS = Object.freeze([
 ]);
 
 const LOADING = "Loading usage…";
-// S5: an Enterprise or Team login is billed per use through the API: its
+// S5: a pay-per-use login (plans.js billsPerUse: no 5h or weekly window): its
 // windows (a "0% used 30d") say nothing, so it shows this instead of numbers.
 const API_USAGE = "API usage";
 // Never a number for it: one that needs signing in says that instead.
 const showsApiUsage = (a) => isPayPerUse(a);
+// S4: at its org's monthly spend limit. Its bars stay when it has some; with
+// none, the limit takes the place of "API usage" or a missing number.
+const SPEND_COPY = Object.freeze({ label: "Spend limit", message: SPEND_LIMIT });
+const spendLimited = (a) => Boolean(a) && !a.needsSignIn && isSpendLimited(a);
+const spendOnly = (a) => spendLimited(a) && (showsApiUsage(a) || windowSections(a).length === 0);
 const NO_DATA = "No usage data";
 const SYSTEM_DEFAULT = "System default";
 
@@ -211,6 +217,7 @@ export const FOOTER = Object.freeze({ pad: 10, gap: 6, sectionGap: 5, char: 6.4,
 // card says the same (Orca's ErrorMessage, stale when numbers are shown).
 function notice(account, hasData) {
   if (account.needsSignIn) return errorCopy("needsSignIn");
+  if (spendLimited(account)) return SPEND_COPY;
   if (account.error) {
     if (!hasData || account.error === "expired") return errorCopy(account.error, account.errorDetail);
     return { label: errorCopy("refreshFailed", null, { stale: true }).label, message: errorCopy(account.error, account.errorDetail).message };
@@ -224,6 +231,7 @@ const noteText = (n) => (n ? [n.label, n.message].filter(Boolean).join(": ") : n
 // What the footer says, whatever its width.
 function footerContent(account, mode, now) {
   if (!account) return { kind: "loading" };
+  if (spendOnly(account)) return { kind: "error", copy: SPEND_COPY, calm: false };
   if (showsApiUsage(account)) return account.needsSignIn ? { kind: "signIn", id: account.id } : { kind: "api" };
   const list = windowSections(account);
   if (list.length === 0) {
@@ -341,6 +349,7 @@ function soonestReset(list, now) {
 
 function usageRow(account, mode, now) {
   const row = { name: "Claude", kind: "usage", status: null, signIn: null, reset: null, headline: null, metrics: [], lines: 1 };
+  if (spendOnly(account)) return { ...row, kind: "error", status: SPEND_LIMIT };
   if (account && showsApiUsage(account)) return account.needsSignIn ? { ...row, ...rowState(account) } : { ...row, kind: "api", status: API_USAGE };
   const list = account ? windowSections(account) : [];
   row.lines = list.length > 3 ? 2 : 1;
@@ -409,7 +418,8 @@ function creditsLine(c) {
 
 function card(account, now) {
   if (showsApiUsage(account)) {
-    return { label: accountLabel(account), windows: [], credits: null, notice: account.needsSignIn ? errorCopy("needsSignIn") : { label: null, message: API_USAGE } };
+    const said = account.needsSignIn ? errorCopy("needsSignIn") : spendLimited(account) ? SPEND_COPY : { label: null, message: API_USAGE };
+    return { label: accountLabel(account), windows: [], credits: null, notice: said };
   }
   const list = windowSections(account);
   return {
@@ -449,7 +459,7 @@ function accountRow(a, active, now, busy) {
     hint: signIn ? (a.signedInAs ? nowSignedInAs(a.signedInAs) : SIGN_IN_HINT) : null,
     signIn,
     bars,
-    status: api && !active ? API_USAGE : !active && !signIn && bars.length === 0 && a.error ? errorCopy(a.error, a.errorDetail).label : null,
+    status: !active && spendLimited(a) ? SPEND_LIMIT : api && !active ? API_USAGE : !active && !signIn && bars.length === 0 && a.error ? errorCopy(a.error, a.errorDetail).label : null,
     disabled: busy || (!signIn && active),
   };
 }

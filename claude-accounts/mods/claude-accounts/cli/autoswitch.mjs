@@ -42,6 +42,7 @@
 // every org's decision.
 
 import { parseArgs } from "node:util";
+import { isAutoSwitchPlan, isSpendLimited } from "../plans.js";
 import { FILES, stateHome } from "./paths.mjs";
 import { failure, readJson, rebuildContract, render, withLock, writeAtomic } from "./files.mjs";
 import { knownAccounts, readSettings, sameEmail, switchAccount, switchOrgAccount } from "./accounts.mjs";
@@ -58,10 +59,11 @@ const WINDOWS = ["session", "weekly", "monthly"];
 const isNumber = (v) => typeof v === "number" && Number.isFinite(v);
 
 // "Max", "Max 5x", "Max 20x", "Pro": a personal subscription.
-export const isSubscription = (plan) => plan === "Pro" || plan === "Max" || (typeof plan === "string" && /^Max \d+x$/.test(plan));
+// Pro, Max and Ultra (plans.js autoSwitch): an individual subscription.
+export const isSubscription = (plan) => isAutoSwitchPlan(plan);
 
 export function isAutoSwitchEligible(account, { excluded = [] } = {}) {
-  return Boolean(account) && isSubscription(account.plan) && !excluded.includes(account.id);
+  return Boolean(account) && isSubscription(account.plan) && !isSpendLimited(account) && !excluded.includes(account.id);
 }
 
 // Numbers good enough to decide on: read within FRESH_MS, with no error and

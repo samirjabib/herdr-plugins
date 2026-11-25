@@ -27,7 +27,8 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
     only the most-used window's number (`--` when there's none). Never the
     icon alone, which would read as all clear.
   - Signed out: "Sign in to see usage" and a **Sign in** action.
-  - An Enterprise or Team account (billed per use through the API) shows
+  - A pay-per-use account (see "Plans": Console, or a Team, Enterprise or
+    unknown plan whose usage has no 5-hour or weekly window) shows
     "API usage" at every width, never a bar or a percentage: its usage is
     in the Claude Console. Signed out, it says "Sign in to see usage".
   - Click it for the popover; click again to close it.
@@ -41,8 +42,8 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
   the `Other accounts` list: each saved account but the active one, with
   their `wk` and `Fable` bars. System default, the Mac's own login (what
   `claude` uses outside Herdr), isn't listed here or in Manage Accounts
-  unless it's the active account. Click one to switch. An Enterprise or
-  Team account (billed per use through the API) carries an "API · pay per
+  unless it's the active account. Click one to switch. A pay-per-use
+  account (see "Plans") carries an "API · pay per
   use" tag and "API usage" in place of its bars (the card and the
   popover's Claude row say "API usage" too when it's active), and its click
   opens Manage Accounts on the question below. An
@@ -55,7 +56,7 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
   none.
 - **Manage Accounts** (a dialog):
   - One row per account: its email, its plan ("Max 5x", "Enterprise"…),
-    "API · pay per use" for an Enterprise or Team plan, "This device",
+    "API · pay per use" for a pay-per-use account (see "Plans"), "This device",
     `org · date` of its last
     sign-in ("Now signed in as {login}" under it when its folder got someone
     else's login), its sign-in status as the last tag ("Signed in", "Signed
@@ -170,7 +171,8 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
     both windows under 95%. Nobody runs Claude on the other accounts, so their
     tokens lapse and their numbers age: their last numbers count, a window past
     its reset counts as empty, and fresh numbers win a tie on room. Never
-    Enterprise or Team (billed per use), never System default or
+    Enterprise or Team (billed per use), never one at its monthly spend
+    limit (see "Monthly spend limit"), never System default or
     an account of the same login, never one excluded with `claude-accounts
     auto-switch exclude <id>` (`include <id>` takes it back; no row for it
     in Manage Accounts).
@@ -458,3 +460,43 @@ overwritten.
 - Move this session to… moves one terminal's Claude to the picked account,
   asking first for a pay-per-use one, while the active account and the other
   terminals stay as they were.
+
+## Plans
+
+Every Claude plan lives in one table, `mods/claude-accounts/plans.js`
+(`PLANS`); the CLI names a login's plan with `planOf` and the mod decides
+"API usage" with `billsPerUse`. Names checked on 2026-11-24 against
+https://claude.com/pricing, https://support.claude.com/en/articles/9266767-what-is-the-team-plan,
+https://support.claude.com/en/articles/9797531-what-is-the-enterprise-plan and
+https://support.claude.com/en/articles/11049741-what-is-the-max-plan.
+
+| Plan | Detected from the login (`oauthAccount`) | 5h / weekly windows | Extra usage / per use | Shown as |
+|------|------------------------------------------|---------------------|-----------------------|----------|
+| Free | `organizationType` `claude_free` | always | no | bars |
+| Pro | `claude_pro` | always | usage credits | bars; auto-switch target |
+| Max 5x / Max 20x / Max | `claude_max`, tier `…_max_5x` / `…_max_20x` / none | always | usage credits | bars; auto-switch target |
+| Ultra | `claude_ultra`, or `claude_max` with an `…_ultra` tier (assumed) | always (weekly) | usage credits | bars; auto-switch target |
+| Team Premium | `claude_team`, `userRateLimitTier` `…_claude_max_…` (observed, assumed Premium) | from usage data | usage credits | bars when the usage has windows |
+| Team Standard | `claude_team` with a `seatTier`, no Max user tier (assumed) | from usage data | usage credits | bars when the usage has windows |
+| Team | `claude_team`, seat unknown | from usage data | usage credits | bars when the usage has windows |
+| Enterprise | `claude_enterprise`: usage-based (no limits) or legacy seat (limits) | from usage data | billed at API rates when usage-based | bars with windows, else "API usage" |
+| Console (API) | `claude_api` or `api` | never | per use | "API usage", "API · pay per use" |
+| anything else | its raw `organizationType` | from usage data | unknown | its raw name; bars with windows, else "API usage" |
+
+"From usage data": the account is pay per use (tag, "API usage", the question
+before switching) until its usage shows a 5-hour or weekly window; once it
+does, it shows its bars like any subscription. No plan at all is never pay per
+use. The automatic switch only moves onto Pro, Max and Ultra.
+
+### Monthly spend limit
+
+An account whose org hit its monthly spend limit (Claude Code says "You've hit
+your org's monthly spend limit") can't run Claude until the month turns over or
+an admin raises the limit. `plans.js` `isSpendLimited` reads it from the usage
+read: `spend` (or the older `extra_usage`) used at or past a non-zero limit
+marks `credits.spendLimited`, and a failed read whose text names the spend
+limit counts too. Every view says "Monthly spend limit reached": the panel's
+card notice, its row in Other accounts, a Manage Accounts badge, and, when it
+has no 5-hour or weekly bars, the footer ("Spend limit") and the popover in
+place of "API usage". A subscription keeps its bars and adds the notice. The
+automatic switch never moves onto it.

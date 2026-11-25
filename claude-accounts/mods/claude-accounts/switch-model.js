@@ -3,8 +3,10 @@
 // herdr or gpui-kit import, so `node --test` loads it.
 //
 //   PAY_PER_USE_TAG, isPayPerUse(account)
-//                         Enterprise and Team plans are billed per use through
-//                         the API: their rows carry the tag
+//                         billed per use through the API (plans.js
+//                         billsPerUse: Console always; Team, Enterprise or an
+//                         unknown plan while its usage has no 5-hour or weekly
+//                         window): its rows carry the tag
 //   payPerUsePrompt(account, { switchMode, scope })
 //                         the question before moving onto such an account by
 //                         hand, or null when it needs none. scope "switch"
@@ -20,6 +22,8 @@
 //   autoSwitchToast(record, label)
 //                         what the footer says about that record
 
+import { billsPerUse } from "./plans.js";
+
 const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const isNumber = (v) => typeof v === "number" && Number.isFinite(v);
 const str = (v) => (typeof v === "string" && v.trim() !== "" ? v : null);
@@ -27,9 +31,7 @@ const str = (v) => (typeof v === "string" && v.trim() !== "" ? v : null);
 // ── Pay per use (S3) ───────────────────────────────────────────────────────
 
 export const PAY_PER_USE_TAG = "API · pay per use";
-const PAY_PER_USE_PLANS = ["Enterprise", "Team"];
-
-export const isPayPerUse = (account) => isObject(account) && PAY_PER_USE_PLANS.includes(account.plan);
+export const isPayPerUse = (account) => billsPerUse(account);
 
 const COST = (who) => `${who} is billed per use through the API, not by a subscription.`;
 const RUNNING = {

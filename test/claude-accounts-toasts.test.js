@@ -484,7 +484,8 @@ test("accounts: one row per saved account: email, This device, org · date, Acti
 
 test("accounts: an account's plan is its first badge, then the pay-per-use tag, before This device and Active", () => {
   const raw = JSON.parse(fixture("accounts.v1.json"));
-  raw.accounts = raw.accounts.map((a) => ({ ...a, plan: a.id === ANA ? "Enterprise" : a.id === BEN ? "Max 5x" : null }));
+  // A usage-based Enterprise: no 5-hour or weekly window in its usage.
+  raw.accounts = raw.accounts.map((a) => (a.id === ANA ? { ...a, plan: "Enterprise", usage: { session: null, weekly: null, fable: null, monthly: null } } : { ...a, plan: a.id === BEN ? "Max 5x" : null }));
   const m = accountsModel({ accounts: readAccounts(JSON.stringify(raw)), settings: readSettings(fixture("settings.json")) });
   assert.deepEqual(m.rows.map((r) => r.badges), [["Enterprise", "API · pay per use", "This device", "Active"], ["Max 5x", "This device"]]);
 });
