@@ -291,9 +291,10 @@ test("outside Herdr a pinned group changes nothing", async (t) => {
 });
 
 // mac-workspace's harness/claude-profiles.tsv lists each Claude account's org
-// (`name<TAB>org<TAB>dir<TAB>default`). In a group folder the launcher never
-// hands on an account of another group: personal/ runs only ~/.claude or a
-// personal row, cs/ and ag/ only their own (an unlisted folder stays theirs).
+// (`name<TAB>org<TAB>dir<TAB>default`). In a group folder the launcher hands on
+// only an account the group may use: personal/ any listed account or ~/.claude
+// (Samir 2026-11-24: personal uses every account, only for its Claude quota),
+// cs/ and ag/ only their own (an unlisted folder stays theirs).
 async function profiles(s) {
   const p = (n) => join(s.home, "profiles", n);
   for (const n of ["ag", "ag2", "me2"]) await mkdir(p(n), { recursive: true });
@@ -305,40 +306,40 @@ async function profiles(s) {
   return { ag: p("ag"), ag2: p("ag2"), me2: p("me2"), cs: join(s.home, ".claude") };
 }
 
-test("in personal/, an ag or cs pick or inherited CLAUDE_CONFIG_DIR never reaches the wrapper", async (t) => {
+test("in personal/, any listed account reaches the wrapper; an unlisted folder never does", async (t) => {
   const s = await sandbox(t, { active: "/x\n" });
   const a = await profiles(s);
-  await writeFile(join(s.home, ".config/herdr-app/claude-accounts/active"), `${a.ag}\n`);
+  await writeFile(join(s.home, ".config/herdr-app/claude-accounts/active"), "/profiles/unknown/home\n");
   const path = await wrapperBin(s);
   const cwd = await workspace(s, "personal/tool/worktrees/w");
-  for (const cfg of [a.ag, join(s.home, "profiles/ag2"), "/profiles/unknown/home"]) {
-    const r = run(s, { HC_TERMINAL_ID: "t1", CLAUDE_CONFIG_DIR: cfg }, [], path, cwd);
-    assert.equal(r.code, 0, r.err);
-    assert.match(r.out, /^dir=<unset>$/m, cfg);
-    assert.match(r.out, /^accounts=<unset>$/m, cfg);
-  }
-  const sw = run(s, { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_DIR: a.ag2 }, [], path, cwd);
-  assert.match(sw.out, /^accounts=<unset>$/m);
-  // A personal account, or ~/.claude, is handed on as it is.
-  for (const ok of [a.me2, a.cs]) {
-    const r = run(s, { HC_TERMINAL_ID: "t1", CLAUDE_CONFIG_DIR: ok, CLAUDE_ACCOUNTS_DIR: ok }, [], path, cwd);
-    assert.match(r.out, new RegExp(`^dir=${ok}$`, "m"));
-    assert.match(r.out, new RegExp(`^accounts=${ok}$`, "m"));
+  const r = run(s, { HC_TERMINAL_ID: "t1", CLAUDE_CONFIG_DIR: "/profiles/other/home" }, [], path, cwd);
+  assert.equal(r.code, 0, r.err);
+  assert.match(r.out, /^dir=<unset>$/m);
+  assert.match(r.out, /^accounts=<unset>$/m);
+  // A personal, cs (~/.claude) or ag account is handed on as it is.
+  for (const ok of [a.me2, a.cs, a.ag, join(s.home, "profiles/ag2")]) {
+    const k = run(s, { HC_TERMINAL_ID: "t1", CLAUDE_CONFIG_DIR: ok, CLAUDE_ACCOUNTS_DIR: ok }, [], path, cwd);
+    assert.match(k.out, new RegExp(`^dir=${ok}$`, "m"), ok);
+    assert.match(k.out, new RegExp(`^accounts=${ok}$`, "m"), ok);
   }
 });
 
-test("without a wrapper, a pick of another group falls back to the group's default account", async (t) => {
+test("without a wrapper, a pick the group may not use falls back to the group's default account", async (t) => {
   const s = await sandbox(t, { active: "/x\n" });
   const a = await profiles(s);
-  await writeFile(join(s.home, ".config/herdr-app/claude-accounts/active"), `${a.ag}\n`);
+  const active = join(s.home, ".config/herdr-app/claude-accounts/active");
+  await writeFile(active, "/profiles/unknown/home\n");
   const personal = await workspace(s, "personal/tool/main");
   assert.match(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, personal).out, /^dir=<unset>$/m);
-  assert.match(run(s, { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_DIR: a.me2 }, [], undefined, personal).out, new RegExp(`^dir=${a.me2}$`, "m"));
+  assert.match(run(s, { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_DIR: a.ag2 }, [], undefined, personal).out, new RegExp(`^dir=${a.ag2}$`, "m"));
+  await writeFile(active, `${a.ag}\n`);
+  assert.match(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, personal).out, new RegExp(`^dir=${a.ag}$`, "m"));
   const cs = await workspace(s, "cs/shop/main");
   assert.match(run(s, { HC_TERMINAL_ID: "t1" }, [], undefined, cs).out, /^dir=<unset>$/m);
   const ag = await workspace(s, "ag/shop-app/main");
   assert.match(run(s, { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_DIR: "" }, [], undefined, ag).out, new RegExp(`^dir=${a.ag}$`, "m"));
   assert.match(run(s, { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_DIR: a.ag2 }, [], undefined, ag).out, new RegExp(`^dir=${a.ag2}$`, "m"));
+  assert.match(run(s, { HC_TERMINAL_ID: "t1", CLAUDE_ACCOUNTS_DIR: a.me2 }, [], undefined, ag).out, new RegExp(`^dir=${a.ag}$`, "m"));
 });
 
 test("in cs/ and ag/, an inherited CLAUDE_CONFIG_DIR of the other org is dropped; their own and unlisted ones stay", async (t) => {
