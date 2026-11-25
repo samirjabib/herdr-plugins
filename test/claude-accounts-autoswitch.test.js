@@ -733,3 +733,82 @@ test("local-39 review: with switchMode keep no session moves; in ask mode the sa
   d = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
   assert.equal(d.sessions, undefined, "the pending question already asks it");
 });
+// Two terminals in personal, t1 on ~/.claude (CS login, full), t2 on X (full, non-active).
+function twoClaudes(s, d1, d2, cwd1, cwd2) {
+  const mk = (dir, pid, sid) => {
+    mkdirSync(join(dir, "sessions"), { recursive: true });
+    writeFileSync(join(dir, "sessions", `${pid}.json`), JSON.stringify({ sessionId: sid, status: "idle" }));
+    mkdirSync(join(dir, "projects", "x"), { recursive: true });
+    writeFileSync(join(dir, "projects", "x", `${sid}.jsonl`), "{}\n");
+  };
+  mk(d1, 4242, "3da9c849-6697-4058-b204-6d1a2711c6f0");
+  mk(d2, 4343, "4da9c849-6697-4058-b204-6d1a2711c6f1");
+  for (const c of [cwd1, cwd2]) mkdirSync(c, { recursive: true });
+  const g1 = JSON.stringify({ state: "live", pid: 4000, title: "a", foreground: { pid: 4242, name: "claude", argv: ["claude"], cwd: cwd1 } });
+  const g2 = JSON.stringify({ state: "live", pid: 4001, title: "b", foreground: { pid: 4343, name: "claude", argv: ["claude"], cwd: cwd2 } });
+  writeFileSync(join(s.box, "bin", "hc"), `#!/bin/sh
+case "$1" in
+  ls) echo '{"terminals":[{"address":"t1","state":"live","agent":"claude-code","where":"a"},{"address":"t2","state":"live","agent":"claude-code","where":"b"}]}' ;;
+  get) case "$*" in *t1*) echo '${g1}' ;; *) echo '${g2}' ;; esac ;;
+  *) exit 1 ;;
+esac
+`);
+}
+
+
+const CS5 = "c5c5c5c5-5555-4555-8555-555555555555";
+const X6 = "d6d6d6d6-6666-4666-8666-666666666666";
+
+test("local-39 verify: ask mode with two moves asks one question at a time and never replaces it while it stands", () => {
+  const s = sandbox({ workspace: true });
+  const dirs = accounts(s, [{ id: CS5, type: MAX, session: 40, weekly: 100 }, { id: X6, type: MAX, session: 99, weekly: 10 }, { id: P1, type: MAX, session: 7, weekly: 43 }], P1);
+  writeFileSync(join(s.home, ".claude.json"), readFileSync(join(dirs[CS5], ".claude.json")));
+  orgRows(s, [["cs", "cs", "~/.claude", "yes"], ["x", "personal", dirs[X6], "no"], ["personal", "personal", dirs[P1], "yes"]]);
+  const cwd = join(s.box, "ws", "personal");
+  twoClaudes(s, join(s.home, ".claude"), dirs[X6], cwd, join(cwd, "proj"));
+  s.cli(["settings", "set", "autoSwitch", "on"]);
+  s.cli(["settings", "set", "switchMode", "ask"]);
+  const first = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
+  assert.equal(first.sessions.length, 1, "one question");
+  const asked = JSON.parse(s.read("pending-switch.json"));
+  for (let i = 0; i < 2; i++) {
+    const d = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
+    assert.equal(d.sessions, undefined, `poll ${i + 2}: the question stands`);
+    assert.deepEqual(JSON.parse(s.read("pending-switch.json")), asked);
+  }
+  // Answered (gone): the next poll asks one question again, still one at a time.
+  rmSync(join(s.state, "pending-switch.json"));
+  const next = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
+  assert.equal(next.sessions.length, 1);
+});
+
+test("local-39 verify: a full Claude with no transcript yet moves nothing, keeps a standing question and records nothing", () => {
+  const s = sandbox({ workspace: true });
+  const dirs = accounts(s, [{ id: CS5, type: MAX, session: 40, weekly: 100 }, { id: P1, type: MAX, session: 7, weekly: 43 }], P1);
+  writeFileSync(join(s.home, ".claude.json"), readFileSync(join(dirs[CS5], ".claude.json")));
+  orgRows(s, [["cs", "cs", "~/.claude", "yes"], ["personal", "personal", dirs[P1], "yes"]]);
+  claudeIn(s, join(s.home, ".claude"));
+  rmSync(join(s.home, ".claude", "projects"), { recursive: true, force: true });
+  s.cli(["settings", "set", "autoSwitch", "on"]);
+  s.cli(["settings", "set", "switchMode", "ask"]);
+  const unrelated = JSON.stringify({ from: "ag-a", to: "ag-b", at: 1, mode: "ask", sessions: [{ terminal: "t77", group: "onAccount" }] });
+  writeFileSync(join(s.state, "pending-switch.json"), unrelated);
+  const d = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
+  assert.equal(d.sessions, undefined);
+  assert.equal(s.read("pending-switch.json"), unrelated);
+  assert.equal(existsSync(join(s.state, "auto-switch.json")), false);
+  // And with no question standing, still nothing to ask: nothing to resume.
+  rmSync(join(s.state, "pending-switch.json"));
+  assert.equal(JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout).sessions, undefined);
+  assert.equal(existsSync(join(s.state, "auto-switch.json")), false);
+});
+
+test("local-39 verify: without the tsv a Claude in a workspace folder on a full account follows the global account", () => {
+  const s = sandbox({ workspace: true });
+  const dirs = accounts(s, [{ id: CS5, type: MAX, session: 40, weekly: 100 }, { id: P1, type: MAX, session: 7, weekly: 43 }], P1);
+  claudeIn(s, dirs[CS5]);
+  s.cli(["settings", "set", "autoSwitch", "on"]);
+  s.cli(["settings", "set", "switchMode", "ask"]);
+  const d = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
+  assert.deepEqual(d.sessions.map((m) => [m.org, m.from, m.to, m.terminals]), [["none", CS5, P1, ["t10h"]]]);
+});

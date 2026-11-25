@@ -628,8 +628,10 @@ async function withRestarting(sessions, scan, doc, from, since, known, outOfScop
   return out;
 }
 
+// Returns what it did: { queued: <switch items queued>, asked: <a question
+// about an onAccount session was written to pending-switch.json> }.
 export async function afterUse(from, to, { scopes } = {}) {
-  if (from === to) return;
+  if (from === to) return { queued: 0, asked: false };
   const home = stateHome();
   const t = timing();
   const known = await knownAccounts(home);
@@ -670,7 +672,7 @@ export async function afterUse(from, to, { scopes } = {}) {
       Object.assign(item, { to, updatedAt: now });
       return true;
     });
-    if (switchMode === "keep") return { result: [], write };
+    if (switchMode === "keep") return { result: { ids: [], asked: false }, write };
     const sessions = await withRestarting(scanned, scan, doc, from, since, known, outOfScope);
     const onAccount = sessions.filter((s) => s.group === "onAccount");
     const ids = [];
@@ -686,9 +688,10 @@ export async function afterUse(from, to, { scopes } = {}) {
     if (tell) {
       await writeAtomic(pendingPath(home), render({ from, to, at: now, mode: switchMode, sessions: sessions.map(publicSession) }));
     }
-    return { result: ids, write: write || ids.length > 0 };
+    return { result: { ids, asked: tell && onAccount.length > 0 }, write: write || ids.length > 0 };
   });
-  if (queued.length > 0) spawnRunner();
+  if (queued.ids.length > 0) spawnRunner();
+  return { queued: queued.ids.length, asked: queued.asked };
 }
 
 // ── restart ─────────────────────────────────────────────────────────────────

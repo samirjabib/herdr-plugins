@@ -49,7 +49,7 @@ import { failure, readJson, rebuildContract, render, withLock, writeAtomic } fro
 import { knownAccounts, readSettings, sameEmail, switchAccount, switchOrgAccount } from "./accounts.mjs";
 import { ORGS, effectiveActives, orgOfCwd, pinnedOrgs, poolOf, readOrgActives, readProfiles } from "./orgs.mjs";
 import { afterUse } from "./restart.mjs";
-import { inspectTerminal, listClaudeTerminals } from "./terminals.mjs";
+import { hasTranscript, inspectTerminal, listClaudeTerminals } from "./terminals.mjs";
 import { join } from "node:path";
 
 export const SWITCH_LINE = 95;
@@ -268,9 +268,13 @@ export async function checkAutoSwitch(home = stateHome(), now = Date.now()) {
 }
 
 // Restarts the sessions pickSessionMoves moves, through afterUse (the restart
-// setting applies): keep moves none and says nothing; ask asks once, not again
-// while pending-switch.json still asks the same; restart queues each terminal
-// once (afterUse keeps out one already heading there). It runs only on a poll
+// setting applies): keep moves none and says nothing; ask asks one question at
+// a time and never replaces one still standing in pending-switch.json (the
+// next move is asked once it's answered); restart queues each terminal once
+// (afterUse keeps out one already heading there). A move is recorded, and
+// returned, only when afterUse queued or asked something, so a poll that only
+// finds the same full session again tells nothing new. Only sessions with a
+// transcript count: one without has nothing to resume. It runs only on a poll
 // that switched no account, whose own afterUse moves its terminals. Terminals
 // are read only when some account is at the line, so a quiet poll calls no
 // hc. Any failure leaves every session where it is and the check's decision
@@ -284,13 +288,9 @@ async function moveSessions(home, now, options) {
   }
 }
 
-// Whether pending-switch.json already asks to move these terminals from → to.
-async function alreadyAsked(home, m) {
-  const pending = await readJson(join(home, FILES.pendingSwitch)).catch(() => null);
-  if (pending?.from !== m.from || pending?.to !== m.to || !Array.isArray(pending.sessions)) return false;
-  const asked = new Set(pending.sessions.filter((x) => x?.group === "onAccount").map((x) => x.terminal));
-  return m.terminals.every((t) => asked.has(t));
-}
+// Whether pending-switch.json still holds a question (any question: a new
+// one would replace it).
+const questionStands = async (home) => Boolean(await readJson(join(home, FILES.pendingSwitch)).catch(() => null));
 
 async function tryMoveSessions(home, now, { known, actives, pinned, scoped = false }) {
   const { switchMode } = await readSettings(home);
@@ -302,16 +302,19 @@ async function tryMoveSessions(home, now, { known, actives, pinned, scoped = fal
     const listed = await listClaudeTerminals();
     sessions = await Promise.all(listed.map(async ({ terminal }) => {
       const found = await inspectTerminal(terminal, known);
-      return { terminal, account: found.kind === "claude" ? found.account : null, org: await orgOfCwd(found.cwd) };
+      const resumable = found.kind === "claude" && (await hasTranscript(found.configDir, found.sessionId));
+      // Without the tsv everything is global: every terminal follows the global account.
+      return { terminal, account: resumable ? found.account : null, org: scoped ? await orgOfCwd(found.cwd) : null };
     }));
   } catch {
     return [];
   }
   const moves = [];
   for (const m of pickSessionMoves(doc, { sessions, actives, pinned, now })) {
-    if (switchMode === "ask" && (await alreadyAsked(home, m))) continue;
+    if (switchMode === "ask" && (await questionStands(home))) break;
+    const { queued, asked } = await afterUse(m.from, m.to, scoped ? { scopes: [m.org] } : {});
+    if (queued === 0 && !asked) continue;
     moves.push(m);
-    await afterUse(m.from, m.to, scoped ? { scopes: [m.org] } : {});
     await record(home, { action: "switch", from: m.from, to: m.to, window: m.window, percent: m.percent }, now, scoped ? m.org : undefined);
   }
   return moves;
