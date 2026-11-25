@@ -7,7 +7,7 @@ import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, hc, readTextFile, checking } from "herdr";
 import * as fs from "fs/promises";
-import { helperLabels, helperBadge, projectLook, roleMark, roleOf, placeOf, orchOf, orgRootOf, isJob, buildTree, headBranch, hasGithub, projectSummary, parsePs, processTree, plumbingNote, procTotal, formatMem, bgState, bgLabel, bgVisible, sleepersOf, sleepTip, sleepEtas, sleepsIn, asleepIn, jobInfo } from "./model.js";
+import { helperLabels, helperBadge, projectLook, roleMark, roleOf, placeOf, orchOf, orgRootOf, isJob, buildTree, headBranch, hasGithub, projectSummary, parsePs, processTree, plumbingNote, procTotal, formatMem, bgState, bgLabel, bgVisible, sleepersOf, sleepTip, sleepEtas, sleepsIn, asleepIn, jobInfo, jobRunsOf, jobRunTip } from "./model.js";
 import { historyUrl, ingestHistory, historyItems, clearDots, liveFlights, flightRows, dotTip, emptyFlights, FLIGHT_MS } from "./flight.js";
 
 function find(node, id) {
@@ -162,11 +162,16 @@ export default class Agents extends View {
         if (JSON.stringify([...etas]) !== JSON.stringify([...(this.etas ?? [])])) { this.etas = etas; cx.notify(); }
         const next = sleepersOf(rows);
         if (JSON.stringify(next) !== JSON.stringify(this.sleepers)) { this.sleepers = next; cx.notify(); }
+        // Scheduled job runs (job-live): running or just ended, in their project's Jobs group.
+        const runs = jobRunsOf(got);
+        if (JSON.stringify(runs) !== JSON.stringify(this.jobRuns ?? [])) { this.jobRuns = runs; cx.notify(); }
       } catch {} // core down: keep the last list
     };
     this.refreshSleepers = sleepers;
     cx.spawn(sleepers);
     cx.timer.every(15000, (cx) => cx.spawn(sleepers));
+    // While a scheduled run runs, its step moves: read every 5 s then.
+    cx.timer.every(5000, (cx) => { if ((this.jobRuns ?? []).some((j) => j.state === "live")) cx.spawn(sleepers); });
     // Colors change rarely: once a minute is enough, and the core only reads one small file.
     cx.timer.every(60000, (cx) => cx.spawn(colors));
     // Live processes under each agent (S4) and each project's summary: read only in a live
@@ -654,10 +659,12 @@ export default class Agents extends View {
   jobRow(t, k, pl = 8) {
     const j = jobInfo(k, Date.now());
     const use = this.use.get(k.address);
-    const color = j.state === "failed" ? t.blocked : j.state === "running" ? t.working : t.dim;
+    const color = j.state === "failed" ? t.blocked : j.state === "running" ? t.working : j.state === "to review" ? t.waiting ?? t.working : t.dim;
     return h_flex().id(`job-${k.address}`).pl(pl).pr(8).rounded(8).h(24).flex_none().gap(6).items_center().text_size(12)
-      .cursor_pointer().hover((el) => el.bg(t.hover)).on_click(() => this.peek(k.address))
-      .tooltip(`${j.name}: ${j.schedule}${j.last ? ` · last run ${j.last}` : ""}`)
+      .cursor_pointer().hover((el) => el.bg(t.hover))
+      // A scheduled run (job-live) opens its live view; a job terminal peeks.
+      .on_click(() => (k.watch ? exec("/usr/bin/open", [k.watch]).catch(() => null) : this.peek(k.address)))
+      .tooltip(k.run ? jobRunTip(k, Date.now()) : `${j.name}: ${j.schedule}${j.last ? ` · last run ${j.last}` : ""}`)
       .child(svg("mods/workspace-chrome/clock.svg").size(12).flex_none().text_color(t.dim))
       .child(div().min_w(0).flex_shrink(1).truncate().text_color(t.muted).child(j.name))
       .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(j.schedule))
@@ -860,7 +867,8 @@ export default class Agents extends View {
     const extras = terms.filter((x) => !this.listed.has(x.address) && !inPanes.has(x.address) && bgVisible(x, now, this.dismissed)
       && (isJob(x.name) || !this.listed.has(x.parent)) && !orchOf(x.name))
       // A sleeper whose terminal is live again (just woken) is an agent row, not a zzz.
-      .concat((this.sleepers ?? []).filter((z) => !all.some((x) => x.state === "live" && x.name === z.name)));
+      .concat((this.sleepers ?? []).filter((z) => !all.some((x) => x.state === "live" && x.name === z.name)))
+      .concat(this.jobRuns ?? []);
     // Background terminals whose CPU and memory the timer reads: extras and agents' kids.
     this.bg = all.filter((x) => x.state === "live" && !this.listed.has(x.address) && !inPanes.has(x.address)).map((x) => x.address);
     const tree = buildTree(list.map((a) => ({ ...a, name: nameOf(a), cwd: cwdOf(a), rank: rankOf(a) || RANK.idle, since: this.since(a), seq: a.seq ?? 0 })), { org, byPriority, extras });
