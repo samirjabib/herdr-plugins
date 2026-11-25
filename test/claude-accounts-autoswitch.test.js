@@ -152,7 +152,7 @@ test("S2: the active saved account borrows System default's fresher numbers for 
 // ── The CLI end to end (S1, S2) ────────────────────────────────────────────
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), "claude-accounts-autoswitch-")));
-after(() => rmSync(root, { recursive: true, force: true }));
+after(() => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
 
 let n = 0;
 function sandbox({ workspace = false } = {}) {
@@ -445,7 +445,7 @@ test("S5: an active pay-per-use account: the card, the footer and the popover sa
 const ORGS_MJS = pathToFileURL(join(MOD, "cli/orgs.mjs")).href;
 const { parseProfiles, poolOf, orgOfCwd, effectiveActives } = await import(ORGS_MJS);
 
-test("S1: the tsv's rows give each org its pool; personal is every account", () => {
+test("S1: the tsv's rows give each org its pool; personal is every listed account and System default", () => {
   const env = { HOME: "/Users/me" };
   const rows = parseProfiles([
     "name\torg\tdir\tdefault",
@@ -469,7 +469,7 @@ test("S1: the tsv's rows give each org its pool; personal is every account", () 
   ];
   assert.deepEqual([...poolOf("cs", accounts, rows, env)], ["default"]);
   assert.deepEqual([...poolOf("ag", accounts, rows, env)], ["a1", "a2"]);
-  assert.deepEqual([...poolOf("personal", accounts, rows, env)], ["default", "a1", "a2", "x"]);
+  assert.deepEqual([...poolOf("personal", accounts, rows, env)], ["default", "a1", "a2"], "an unlisted folder is no one's");
 });
 
 test("S1: a terminal's org is the first folder under the workspace root; anything else has none", async () => {
@@ -484,6 +484,7 @@ test("S1: a terminal's org is the first folder under the workspace root; anythin
 
 test("S1: an org runs on its own file's account when it is in its pool, else on the global one when that is, else on none", () => {
   const rows = [{ name: "ag", org: "ag", dir: "/ag" }, { name: "u", org: "ag", dir: "/u" }, { name: "cs", org: "cs", dir: "/h/.claude" }];
+  rows.push({ name: "p", org: "personal", dir: "/p" });
   const accounts = [{ id: "default", isDefault: true }, { id: "ag", configDir: "/ag" }, { id: "u", configDir: "/u" }, { id: "p", configDir: "/p" }];
   const env = { HOME: "/h" };
   const known = { active: "ag", accounts };
@@ -511,7 +512,7 @@ test("S1: per org, the ag account at 96% moves to the other ag account, never to
     { id: AG2, type: MAX, session: 50, weekly: 50 },
     { id: P1, type: MAX, session: 0, weekly: 0 },
   ], AG1);
-  orgRows(s, [["ag", "ag", dirs[AG1], "yes"], ["u", "ag", dirs[AG2], "no"]]);
+  orgRows(s, [["ag", "ag", dirs[AG1], "yes"], ["u", "ag", dirs[AG2], "no"], ["p", "personal", dirs[P1], "no"]]);
   s.cli(["settings", "set", "autoSwitch", "on"]);
   const check = s.cli(["auto-switch", "check", "--json"]);
   assert.equal(check.status, 0, check.stderr);
@@ -536,7 +537,7 @@ test("S1: personal runs on any account, a cs or ag one too; its switch leaves cs
     { id: AG2, type: MAX, session: 20, weekly: 20 },
     { id: P1, type: MAX, session: 97, weekly: 30 },
   ], AG1);
-  orgRows(s, [["ag", "ag", dirs[AG1], "yes"], ["u", "ag", dirs[AG2], "no"]]);
+  orgRows(s, [["ag", "ag", dirs[AG1], "yes"], ["u", "ag", dirs[AG2], "no"], ["p", "personal", dirs[P1], "no"]]);
   writeFileSync(join(s.state, "active.personal"), dirs[P1]);
   s.cli(["settings", "set", "autoSwitch", "on"]);
   const d = JSON.parse(s.cli(["auto-switch", "check", "--json"]).stdout);
@@ -561,7 +562,7 @@ test("S1: `use` by hand sets every org whose pool has the account, and leaves th
     { id: AG2, type: MAX, session: 20, weekly: 20 },
     { id: P1, type: MAX, session: 0, weekly: 0 },
   ], AG1);
-  orgRows(s, [["ag", "ag", dirs[AG1], "yes"], ["u", "ag", dirs[AG2], "no"]]);
+  orgRows(s, [["ag", "ag", dirs[AG1], "yes"], ["u", "ag", dirs[AG2], "no"], ["p", "personal", dirs[P1], "no"]]);
   writeFileSync(join(s.state, "active.ag"), dirs[AG1]);
   let r = s.cli(["use", P1, "--json"]);
   assert.equal(r.status, 0, r.stderr);

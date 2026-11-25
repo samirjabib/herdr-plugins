@@ -6,8 +6,10 @@
 // account belongs to the org of the row whose dir is its config dir (System
 // default's is ~/.claude). The pools:
 //   cs, ag     the accounts of that org's rows, never another org's;
-//   personal   every account (Samir 2026-11-24: personal uses every Claude
-//              account, only for its quota).
+//   personal   every listed account, whatever its org, and System default
+//              (Samir 2026-11-24: personal uses every Claude account, only for
+//              its quota), as the launcher's `fits` allows it; an unlisted
+//              folder is no one's.
 // Each org has its own active account, `active.<org>` in the state folder
 // (the `active` file's format: the exact config dir, "" for System default).
 // An org with no such file, or one naming an account outside its pool,
@@ -71,7 +73,11 @@ export function orgOfAccount(account, rows, env = process.env) {
 
 // The ids of an org's pool, from knownAccounts' list.
 export function poolOf(org, accounts, rows, env = process.env) {
-  return new Set(accounts.filter((a) => org === "personal" || orgOfAccount(a, rows, env) === org).map((a) => a.id));
+  const fits = (a) => {
+    const own = orgOfAccount(a, rows, env);
+    return org === "personal" ? own !== null || a.isDefault : own === org;
+  };
+  return new Set(accounts.filter(fits).map((a) => a.id));
 }
 
 // The org of a folder, from its path under the workspace root, or null.

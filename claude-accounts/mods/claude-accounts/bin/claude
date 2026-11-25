@@ -16,6 +16,13 @@
 #   3. else the first line of ~/.config/herdr-app/claude-accounts/active;
 #   4. else (no active file) the environment as it is.
 # An empty folder means System default: CLAUDE_CONFIG_DIR is unset.
+# In an ag, cs or personal folder, when ~/mac-workspace/harness/claude-profiles.tsv
+# lists each account's org, no account the group may not use is handed on:
+# personal/ runs any listed account or ~/.claude (all of Samir's accounts, only
+# their Claude quota), cs/ and ag/ only their own org's (or an unlisted folder).
+# An inherited CLAUDE_CONFIG_DIR that does not fit is unset, and a pick that
+# does not fit is dropped (a wrapper then chooses) or, without a wrapper,
+# replaced by the group's default row (personal: System default).
 # Outside Herdr it changes nothing. Then it runs the next `claude` on the
 # PATH that is not this script, with the same arguments.
 #
@@ -55,22 +62,22 @@ if [ "$(head -c 2 "$next" 2>/dev/null)" = "#!" ] && grep -q CLAUDE_ACCOUNTS_DIR 
   wrapper=1
 fi
 
-# The mac-workspace group of the current folder (its first component under
-# ~/mac-workspace), if any.
-current_group() {
+tab=$(printf '\t')
+
+# The mac-workspace group of the current folder: its first component under
+# ~/mac-workspace (ag, cs, personal, ...), if any.
+ws_group() {
   ws=$(cd "$HOME/mac-workspace" 2>/dev/null && pwd -P) || return 1
   here=$(pwd -P 2>/dev/null) || return 1
   case $here/ in "$ws"/*/*) ;; *) return 1 ;; esac
-  group=${here#"$ws"/}
-  printf '%s\n' "${group%%/*}"
+  g=${here#"$ws"/}
+  printf '%s\n' "${g%%/*}"
 }
 
-# The config folder group-accounts pins to the current folder's group, if any.
+# The config folder group-accounts pins to $group, if any.
 group_account() {
   map="$state/group-accounts"
-  [ -r "$map" ] || return 1
-  group=$(current_group) || return 1
-  tab=$(printf '\t')
+  [ -n "$group" ] && [ -r "$map" ] || return 1
   while IFS= read -r line || [ -n "$line" ]; do
     case $line in "#"*|"") continue ;; esac
     [ "${line%%"$tab"*}" = "$group" ] || continue
@@ -82,23 +89,105 @@ group_account() {
   return 1
 }
 
+# same_dir <a> <b>: one folder, under any spelling (~, a trailing /, a link).
+same_dir() {
+  a=$1 b=$2
+  case $a in "~"*) a=$HOME${a#"~"} ;; esac
+  case $b in "~"*) b=$HOME${b#"~"} ;; esac
+  [ "${a%/}" = "${b%/}" ] || { [ -d "$a" ] && [ "$a" -ef "$b" ]; }
+}
+
+# mac-workspace lists each Claude account's org in harness/claude-profiles.tsv
+# (`name<TAB>org<TAB>dir<TAB>default`). profile_row <dir>: "org<TAB>default"
+# of the row whose dir is <dir>. profile_default <org>: the dir of that org's
+# default row.
+profiles="$HOME/mac-workspace/harness/claude-profiles.tsv"
+profile_row() {
+  [ -r "$profiles" ] || return 1
+  while IFS="$tab" read -r name org pdir def rest || [ -n "$name" ]; do
+    case $name in ""|"#"*|name) continue ;; esac
+    same_dir "$1" "$pdir" && { printf '%s\t%s\n' "$org" "$def"; return 0; }
+  done < "$profiles"
+  return 1
+}
+profile_default() {
+  [ -r "$profiles" ] || return 1
+  while IFS="$tab" read -r name org pdir def rest || [ -n "$name" ]; do
+    case $name in ""|"#"*|name) continue ;; esac
+    [ "$org" = "$1" ] && [ "$def" = yes ] || continue
+    case $pdir in "~"*) pdir=$HOME${pdir#"~"} ;; esac
+    printf '%s\n' "$pdir"
+    return 0
+  done < "$profiles"
+  return 1
+}
+
+# fits <dir>: the account in <dir> ("" = System default, ~/.claude) may run in
+# $group, as mac-workspace's claude shim allows: personal/ ~/.claude or any
+# listed account (Samir 2026-11-24: personal uses every account, only for its
+# Claude quota); ag/ and cs/ an account of their own org or an unlisted folder.
+# The folder group-accounts pins to the group always fits.
+fits() {
+  d=${1:-$HOME/.claude}
+  [ -n "$pinned" ] && same_dir "$d" "$pinned" && return 0
+  row=$(profile_row "$d") || row=
+  org=${row%%"$tab"*}
+  if [ "$group" = personal ]; then
+    [ -n "$org" ] || same_dir "$d" "$HOME/.claude"
+  else
+    [ -z "$org" ] || [ "$org" = "$group" ]
+  fi
+}
+
+# The account a group falls back to when a pick does not fit it: its default
+# row, else (personal) System default. ~/.claude is System default too.
+group_fallback() {
+  if d=$(profile_default "$group"); then
+    same_dir "$d" "$HOME/.claude" && d=
+    printf '%s\n' "$d"
+  elif [ "$group" = personal ]; then
+    printf '\n'
+  else
+    return 1
+  fi
+}
+
 if [ -n "${HC_TERMINAL_ID:-}" ]; then
   active="$state/active"
+  # In an ag, cs or personal folder no account the group may not use is
+  # handed on, not even one inherited from the session that opened this one (Claude Code
+  # passes its CLAUDE_CONFIG_DIR to every terminal and agent it starts).
+  # Only with harness/claude-profiles.tsv, which tells the launcher each
+  # account's org; group-accounts pins work without it.
+  group=$(ws_group) || group=
+  pinned=$(group_account) || pinned=
+  case $group in
+    cs|ag|personal) [ -r "$state/active.$group" ] && active="$state/active.$group" ;;
+  esac
+  [ -r "$profiles" ] || group=
+  case $group in ag|cs|personal) ;; *) group= ;; esac
+  if [ -n "$group" ]; then
+    if [ -n "${CLAUDE_CONFIG_DIR:-}" ] && ! fits "$CLAUDE_CONFIG_DIR"; then
+      unset CLAUDE_CONFIG_DIR
+    fi
+  fi
   pick=0
-  if pinned=$(group_account); then
+  if [ -n "$pinned" ]; then
     dir=$pinned
     pick=1
   elif [ "${CLAUDE_ACCOUNTS_DIR+set}" = set ]; then
     dir=$CLAUDE_ACCOUNTS_DIR
     pick=1
-  else
-    group=$(current_group) || group=
-    case $group in
-      cs|ag|personal) [ -r "$state/active.$group" ] && active="$state/active.$group" ;;
-    esac
-    if [ -r "$active" ]; then
-      IFS= read -r dir < "$active" || [ -n "$dir" ] || dir=
-      pick=1
+  elif [ -r "$active" ]; then
+    IFS= read -r dir < "$active" || [ -n "$dir" ] || dir=
+    pick=1
+  fi
+  if [ "$pick" = 1 ] && [ -n "$group" ] && ! fits "$dir"; then
+    # A wrapper picks the group's own account itself; else the group's default.
+    if [ "$wrapper" = 1 ]; then
+      pick=0
+    elif ! dir=$(group_fallback); then
+      dir=
     fi
   fi
   if [ "$pick" = 1 ] && [ "$wrapper" = 1 ]; then
@@ -112,7 +201,7 @@ if [ -n "${HC_TERMINAL_ID:-}" ]; then
       unset CLAUDE_CONFIG_DIR
     fi
   fi
-  [ "$wrapper" = 1 ] || unset CLAUDE_ACCOUNTS_DIR
+  [ "$wrapper" = 1 ] && [ "$pick" = 1 ] || unset CLAUDE_ACCOUNTS_DIR
 fi
 
 # Inside Herdr, in a mac-workspace checkout, the session gets a name that tells
