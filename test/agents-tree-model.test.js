@@ -7,6 +7,7 @@ import {
   projectOf, projectOrchOf, buildTree, headBranch, hasGithub, projectSummary,
   parsePs, shortCmd, processRows, formatMem, processTree, plumbingNote, procTotal,
   bgState, bgLabel, bgVisible, jobInfo, placeOf, orgRootOf, sleepersOf, sleepTip, sleepEtas, sleepsIn, asleepIn,
+  jobRunsOf, jobRunTip,
 } from "../worktrees/mods/agents-tree/model.js";
 
 const R = "/Users/me/mac-workspace";
@@ -516,4 +517,41 @@ test("roleOf gives every placed agent its role: Boss, org lead, project lead, wo
     t1: "Workspace Boss", t2: "Helper", t3: "Org lead", t4: "Helper", t5: "Project lead on main", t6: "Helper",
     t7: "Worker in nav", t8: "Helper", "sleep:s1": "Helper",
   });
+});
+
+// job-live (mac-workspace local-50): a scheduled job's run, from the core's /api/agents `jobs`.
+const RUN = { name: "job-collie-design", job: "collie-design", run: "collie-design-20261125-1630", org: "personal",
+  project: "mac-workspace", status: "running", cwd: `${R}/personal/mac-workspace/worktrees/job-collie-design-20261125-1630`,
+  step: "Bash: ws playwright shot overview", steps: 12, startedMs: 1_000_000_000 - 7 * 60000, endedMs: null,
+  summary: "", screenshots: 2, watch: "/api/jobs/watch/collie-design-20261125-1630" };
+
+test("a running scheduled job is a tree extra named job-<id> that opens its live view", () => {
+  const [x] = jobRunsOf({ agents: [], jobs: [RUN] });
+  assert.equal(x.address, "jobrun:collie-design-20261125-1630");
+  assert.equal(x.name, "job-collie-design");
+  assert.equal(x.cwd, RUN.cwd);
+  assert.equal(x.state, "live");
+  assert.equal(x.watch, "http://127.0.0.1:4317/api/jobs/watch/collie-design-20261125-1630");
+  assert.deepEqual(jobRunsOf({ agents: [] }), []);
+  assert.deepEqual(jobRunsOf([{ terminal: "t1" }]), []); // an older core: a bare list, no jobs
+  assert.deepEqual(jobRunsOf({ jobs: [{ ...RUN, run: "../x" }] }), []); // never a forged id
+});
+
+test("a scheduled run says its step while it runs, its outcome once it ends", () => {
+  const now = 1_000_000_000;
+  const [x] = jobRunsOf({ jobs: [RUN] });
+  assert.deepEqual(jobInfo(x, now), { name: "collie-design", schedule: "Bash: ws playwright shot overview", state: "running", last: "7m" });
+  const [done] = jobRunsOf({ jobs: [{ ...RUN, status: "proposal", endedMs: now - 2 * 60000, summary: "Spacing tightened" }] });
+  assert.deepEqual(jobInfo(done, now), { name: "collie-design", schedule: "Spacing tightened", state: "to review", last: "2m ago" });
+  const [bad] = jobRunsOf({ jobs: [{ ...RUN, status: "failed", endedMs: now - 60000, summary: "run exited 1" }] });
+  assert.equal(jobInfo(bad, now).state, "failed");
+  assert.match(jobRunTip(x, now), /^collie-design · running 7m · 12 steps · 2 screenshots\nNow: Bash: ws playwright shot overview\nClick: watch it live/);
+});
+
+test("a scheduled run hangs in its project's Jobs group", () => {
+  const extras = jobRunsOf({ jobs: [RUN] });
+  const tree = buildTree([], { extras });
+  const personal = tree.seats.find((s) => s.org === "personal");
+  const p = personal.projects.find((q) => q.name === "mac-workspace");
+  assert.deepEqual(p.jobs.map((j) => j.address), ["jobrun:collie-design-20261125-1630"]);
 });

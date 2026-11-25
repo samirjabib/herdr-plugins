@@ -377,6 +377,7 @@ function span(ms) {
 // with the next run (`job.next`, ms) or "on watch", running/done/failed/closed, and its last run.
 export function jobInfo(term, now) {
   if (!isJob(term.name)) return null;
+  if (term.run) return runInfo(term, now);
   const labels = term.labels ?? {};
   const next = Number(labels["job.next"]);
   const every = labels["job.schedule"];
@@ -384,6 +385,40 @@ export function jobInfo(term, now) {
   const state = term.state === "live" ? "running" : bgState(term);
   const last = term.finished_ms != null ? `${span(now - term.finished_ms)} ago` : null;
   return { name: term.name.slice(4), schedule, state, last };
+}
+
+// A scheduled job's run (mac-workspace's launchd jobs, job-live): from the core's /api/agents
+// `jobs`, each as a tree extra named job-<id> so it hangs in its project's Jobs group; a click
+// opens its live view (steps and screenshots) from the core.
+const JOB_CORE = "http://127.0.0.1:4317";
+const RUN_WORDS = { running: "running", proposal: "to review", ok: "done", failed: "failed", timeout: "failed" };
+
+export function jobRunsOf(got) {
+  const list = Array.isArray(got?.jobs) ? got.jobs : [];
+  return list
+    .filter((j) => j && /^[a-z0-9][a-z0-9-]*$/.test(j.run ?? "") && /^[a-z0-9][a-z0-9-]*$/.test(j.job ?? ""))
+    .map((j) => ({ address: `jobrun:${j.run}`, name: `job-${j.job}`, run: j.run, job: j.job, cwd: j.cwd ?? null,
+      status: j.status ?? "", state: j.status === "running" ? "live" : "finished", step: j.step ?? "",
+      steps: j.steps ?? 0, screenshots: j.screenshots ?? 0, summary: j.summary ?? "",
+      startedMs: j.startedMs ?? null, finished_ms: j.endedMs ?? null, labels: {},
+      watch: `${JOB_CORE}/api/jobs/watch/${j.run}` }));
+}
+
+function runInfo(r, now) {
+  const running = r.status === "running";
+  const state = RUN_WORDS[r.status] ?? r.status;
+  const schedule = running ? r.step || "starting" : r.summary || r.step || state;
+  const last = running ? (r.startedMs ? span(now - r.startedMs) : null) : r.finished_ms != null ? `${span(now - r.finished_ms)} ago` : null;
+  return { name: r.job, schedule, state, last };
+}
+
+// A scheduled run's tooltip: how long it has run, how far it got, what it does now, the click.
+export function jobRunTip(r, now) {
+  const j = runInfo(r, now);
+  const head = [r.job, r.status === "running" ? `running${j.last ? ` ${j.last}` : ""}` : `${j.state}${j.last ? ` ${j.last}` : ""}`,
+    `${r.steps} steps`, ...(r.screenshots ? [`${r.screenshots} screenshots`] : [])].join(" · ");
+  const now_ = r.status === "running" ? `Now: ${r.step || "starting"}` : r.summary || r.step;
+  return [head, now_, r.status === "running" ? "Click: watch it live" : "Click: its steps and report"].filter(Boolean).join("\n");
 }
 
 // Resident memory (KB, as ps gives it) said short.
