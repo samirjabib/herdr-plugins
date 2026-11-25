@@ -194,6 +194,17 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
   under `~/mac-workspace/<group>/` runs on that folder, over the active
   account and a switch's restart, so that group never lands on another
   account. A pin to a folder that does not exist is ignored.
+- **A group runs only the accounts it may use.** When
+  `~/mac-workspace/harness/claude-profiles.tsv` exists (it lists each
+  account's org), a Claude started under `~/mac-workspace/personal/` runs
+  `~/.claude` or any listed account (all of Samir's accounts, used only for
+  their Claude quota), and one under `cs/` or `ag/` only an account of that org
+  (or a folder the file does not list). The launcher drops an inherited
+  `CLAUDE_CONFIG_DIR` that does not fit (the session that opened the terminal
+  passes its own on), and a pick (switch restart or `active`) that does not
+  fit is not handed on: an account-aware wrapper chooses the group's own
+  account, else the launcher falls back to the group's default row (personal:
+  System default). So no account stops Claude from starting in `personal/`.
 - **Session names.** In a mac-workspace checkout (`~/mac-workspace/<group>/<project>/main`
   or `.../worktrees/<worktree>`), the launcher names the session
   `<Mac> · <project> · <worktree or main> · <account>`, e.g.
@@ -284,7 +295,8 @@ scripts/install.sh claude-accounts
   `[ -n "$HC_TERMINAL_ID" ] && PATH="$HOME/.config/herdr-app/mods/claude-accounts/bin:$PATH"`.
   It uses the folder `group-accounts` pins to the checkout's group, else
   `CLAUDE_ACCOUNTS_DIR` when set (even empty), else the first line of
-  `active`, sets or unsets `CLAUDE_CONFIG_DIR`, and runs the next `claude` on
+  `active`, never one the group may not use (see above), sets or unsets
+  `CLAUDE_CONFIG_DIR`, and runs the next `claude` on
   the PATH. When that next `claude` is an account-aware wrapper (a script that
   reads `CLAUDE_ACCOUNTS_DIR`, such as mac-workspace's `bin/shims/claude`,
   which keeps each org on its own accounts), it hands the pick on as
