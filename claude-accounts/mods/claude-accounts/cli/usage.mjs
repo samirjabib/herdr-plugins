@@ -150,8 +150,12 @@ function fromSpend(spend) {
     : limit !== null && limit > 0 && spent !== null
       ? clamp((spent / limit) * 100)
       : null;
-  return { balance, limit, percent };
+  return { balance, limit, percent, spendLimited: atLimit(limit, spent, percent) };
 }
+
+// Spent all of a real (non-zero) limit (S4).
+const atLimit = (limit, spent, percent) =>
+  limit !== null && limit > 0 && ((spent !== null && spent >= limit) || (percent !== null && percent >= 100));
 
 // The older `extra_usage` shape (mapLegacyExtraUsage): amounts before
 // utilization, which has been seen as a 0–1 fraction too.
@@ -162,7 +166,7 @@ function fromExtraUsage(extra) {
   const spent = moneyToMajor({ amount_minor: extra.used_credits ?? undefined, exponent: extra.decimal_places });
   const percent =
     limit > 0 && spent !== null ? clamp((spent / limit) * 100) : finite(extra.utilization) ? clamp(extra.utilization) : null;
-  return { balance: null, limit, percent };
+  return { balance: null, limit, percent, spendLimited: atLimit(limit, spent, percent) };
 }
 
 const spendWindow = (x) => (x && x.percent !== null && x.limit !== null && x.limit > 0 ? { percent: Math.round(x.percent), resetsAt: null } : null);
@@ -183,7 +187,7 @@ export function parseUsageResponse(data) {
   const monthly = session || weekly ? null : (spendWindow(spend) ?? spendWindow(legacy));
   return {
     usage: { session, weekly, fable, monthly },
-    credits: extra ? { balance: extra.balance, limit: extra.limit } : null,
+    credits: extra ? { balance: extra.balance, limit: extra.limit, ...(extra.spendLimited ? { spendLimited: true } : {}) } : null,
   };
 }
 
@@ -249,7 +253,7 @@ const loginRecord = (l) =>
 function readEntry(raw) {
   const e = isObject(raw) ? raw : {};
   const usage = isObject(e.usage) ? e.usage : {};
-  const credits = isObject(e.credits) ? { balance: time(e.credits.balance), limit: time(e.credits.limit) } : null;
+  const credits = isObject(e.credits) ? { balance: time(e.credits.balance), limit: time(e.credits.limit), ...(e.credits.spendLimited === true ? { spendLimited: true } : {}) } : null;
   const claim = isObject(e.claim) && Number.isInteger(e.claim.pid) && finite(e.claim.at) ? { pid: e.claim.pid, at: e.claim.at } : null;
   return {
     usage: Object.fromEntries(WINDOWS.map((w) => [w, readWindow(usage[w])])),

@@ -171,7 +171,8 @@ the same files and run the same commands: see [CONTRACT.md](CONTRACT.md).
     both windows under 95%. Nobody runs Claude on the other accounts, so their
     tokens lapse and their numbers age: their last numbers count, a window past
     its reset counts as empty, and fresh numbers win a tie on room. Never
-    Enterprise or Team (billed per use), never System default or
+    Enterprise or Team (billed per use), never one at its monthly spend
+    limit (see "Monthly spend limit"), never System default or
     an account of the same login, never one excluded with `claude-accounts
     auto-switch exclude <id>` (`include <id>` takes it back; no row for it
     in Manage Accounts).
@@ -486,3 +487,16 @@ https://support.claude.com/en/articles/11049741-what-is-the-max-plan.
 before switching) until its usage shows a 5-hour or weekly window; once it
 does, it shows its bars like any subscription. No plan at all is never pay per
 use. The automatic switch only moves onto Pro, Max and Ultra.
+
+### Monthly spend limit
+
+An account whose org hit its monthly spend limit (Claude Code says "You've hit
+your org's monthly spend limit") can't run Claude until the month turns over or
+an admin raises the limit. `plans.js` `isSpendLimited` reads it from the usage
+read: `spend` (or the older `extra_usage`) used at or past a non-zero limit
+marks `credits.spendLimited`, and a failed read whose text names the spend
+limit counts too. Every view says "Monthly spend limit reached": the panel's
+card notice, its row in Other accounts, a Manage Accounts badge, and, when it
+has no 5-hour or weekly bars, the footer ("Spend limit") and the popover in
+place of "API usage". A subscription keeps its bars and adds the notice. The
+automatic switch never moves onto it.

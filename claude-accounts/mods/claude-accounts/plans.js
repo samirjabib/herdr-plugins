@@ -85,3 +85,18 @@ export function billsPerUse(account) {
 }
 
 export const isAutoSwitchPlan = (name) => planByName(name)?.autoSwitch === true;
+
+// At its org's monthly spend limit (odd/tasks/team-usage.md S4): "You've hit
+// your org's monthly spend limit". The usage read marks credits.spendLimited
+// when spend reaches its limit; a failed read whose text names the limit says
+// the same. Such an account can't run Claude until the month turns over or an
+// admin raises the limit, so every view says it and the automatic switch
+// never moves onto it.
+export const SPEND_LIMIT = "Monthly spend limit reached";
+const SPEND_LIMIT_TEXT = /spend limit/i;
+
+export function isSpendLimited(account) {
+  if (!isObject(account)) return false;
+  if (isObject(account.credits) && account.credits.spendLimited === true) return true;
+  return typeof account.errorDetail === "string" && SPEND_LIMIT_TEXT.test(account.errorDetail);
+}

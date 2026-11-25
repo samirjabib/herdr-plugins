@@ -362,10 +362,11 @@ test("credits and the monthly spend window (claude-usage-credits.ts): spend befo
   const plan = parseUsageResponse({ five_hour: { utilization: 10 }, spend });
   assert.equal(plan.usage.monthly, null, "with plan windows, spend is overage, not the account's limit");
   assert.deepEqual(plan.credits, { balance: 37.5, limit: 50 });
-  // spend.percent wins and is clamped; the cap stands in for a missing limit.
+  // spend.percent wins and is clamped; the cap stands in for a missing limit;
+  // past 100% the limit is hit (odd/tasks/team-usage.md S4).
   assert.deepEqual(parseUsageResponse({ spend: { percent: 130, cap: { money: { amount_minor: 200000, exponent: 3 } } } }), {
     usage: { ...empty, monthly: win(100, null) },
-    credits: { balance: null, limit: 200 },
+    credits: { balance: null, limit: 200, spendLimited: true },
   });
   // Legacy extra_usage: minor units with decimal_places, amounts before utilization.
   assert.deepEqual(parseUsageResponse({ extra_usage: { is_enabled: true, monthly_limit: 10000, used_credits: 2500, utilization: 0.9, decimal_places: 2 } }), {

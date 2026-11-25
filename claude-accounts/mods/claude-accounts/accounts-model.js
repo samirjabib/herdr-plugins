@@ -34,6 +34,7 @@
 
 import { formatDate } from "./format.js";
 import { PAY_PER_USE_TAG, isPayPerUse, autoSwitchSetting } from "./switch-model.js";
+import { SPEND_LIMIT, isSpendLimited } from "./plans.js";
 
 const isObject = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v) => (typeof v === "string" && v.trim() !== "" ? v : null);
@@ -140,7 +141,7 @@ export function accountsModel({ accounts, settings, dismissed = null, signingIn 
         id: a.id,
         email: str(a.email) ?? str(a.label) ?? UNNAMED,
         // An Enterprise or Team login is billed per use (S3): said after its plan.
-        badges: [str(a.plan), isPayPerUse(a) ? PAY_PER_USE_TAG : null, THIS_DEVICE, isActive ? "Active" : null].filter(Boolean),
+        badges: [str(a.plan), isPayPerUse(a) ? PAY_PER_USE_TAG : null, isSpendLimited(a) ? SPEND_LIMIT : null, THIS_DEVICE, isActive ? "Active" : null].filter(Boolean),
         subtitle: needsSignIn && !signedInAs ? "Sign in again to use this account" : [str(a.org), date].filter(Boolean).join(" · "),
         hint: signedInAs ? `Now signed in as ${signedInAs}` : null,
         // S6: whether this account's own login is there, said on the row; the
