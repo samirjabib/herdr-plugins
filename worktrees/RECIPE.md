@@ -91,6 +91,15 @@ go to sleep and come back where they were.
   Claude; a worktree opens as a tab in its project's space; ⌘⏎ opens New
   worktree for the selected project. The folders are read once per opening
   (HEAD files straight from disk, no git per checkout).
+- **Links open in the org's browser profile** (`org-links`, a terminal link
+  handler the layout lists in `link_handlers`). Cmd-click a web link in a
+  terminal and it goes to mac-workspace's `ws open <url> --cwd <that terminal's
+  folder>`: under `cs/`, `ag/` or `personal/` it opens in that org's ego lite
+  profile (CS, AG, Samir), never another org's; a folder in no org (the root,
+  home) opens it in the default browser and a toast says so; a refusal (the
+  org's profile missing on this Mac) is an error toast, never another browser.
+  A remote terminal, a file link, or a Mac without `~/mac-workspace/bin/ws`
+  keeps Herdr's usual opener.
 - **Files and Changes panels** (`files-ws`, `changes-ws`, copies of Herdr's).
   They already follow the focused pane's checkout; a row under the title now
   says which: the same `<project> › <worktree>` chip (hover: the path) and its
