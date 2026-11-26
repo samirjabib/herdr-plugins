@@ -377,16 +377,20 @@ test("credits and the monthly spend window (claude-usage-credits.ts): spend befo
   assert.deepEqual(parseUsageResponse({ spend: { used: { amount_minor: 5 } }, extra_usage: { utilization: 50 } }), { usage: empty, credits: null });
 });
 
-test("the org's monthly spend limit: extra_usage.spend_limit_reached fills the monthly window, plan windows or not", async () => {
+test("the org's monthly spend limit: spend_limit_reached fills the monthly window only without plan windows", async () => {
   const { parseUsageResponse } = await cliModule("usage");
-  // A Team seat whose org turned extra usage off at its cap (the endpoint's shape, 2026-11-25).
-  const blocked = parseUsageResponse({
-    limits: [{ kind: "session", percent: 40 }, { kind: "weekly_all", percent: 91 }],
+  // A Team Premium seat whose org turned extra usage off at its cap (the endpoint's shape,
+  // 2026-11-25): the flag caps overage only; its 5-hour and weekly windows still run Claude.
+  const capped = {
     spend: { used: { amount_minor: 0, exponent: 2 }, limit: null, percent: 0, enabled: false, disabled_reason: "org_level_disabled_until" },
     extra_usage: { is_enabled: false, monthly_limit: null, disabled_reason: "org_level_disabled_until", spend_limit_reached: true },
-  });
-  assert.deepEqual(blocked.usage.monthly, win(100, null));
-  assert.equal(blocked.usage.weekly.percent, 91, "the plan windows stay");
+  };
+  const seat = parseUsageResponse({ limits: [{ kind: "session", percent: 11 }, { kind: "weekly_all", percent: 2 }], ...capped });
+  assert.equal(seat.usage.monthly, null, "plan windows with room: no false 100% monthly");
+  assert.equal(seat.usage.session.percent, 11);
+  assert.equal(seat.usage.weekly.percent, 2, "the plan windows stay");
+  // A spend-only account (no plan windows) at its cap can't run: a full monthly window.
+  assert.deepEqual(parseUsageResponse(capped).usage.monthly, win(100, null));
   const open = parseUsageResponse({ limits: [{ kind: "session", percent: 40 }], extra_usage: { spend_limit_reached: false } });
   assert.equal(open.usage.monthly, null, "not reached: no window");
 });

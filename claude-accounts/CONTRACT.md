@@ -64,10 +64,13 @@ change without notice.
 
 The windows: `session` is the 5-hour limit, `weekly` the 7-day limit on all
 models, `fable` the weekly Fable limit, and `monthly` the monthly spend
-limit. `monthly` is 100 with no reset whenever the org's monthly spend limit
-is reached (the endpoint's `extra_usage.spend_limit_reached`), plan windows
-or not: Claude refuses every turn there, and the automatic switch moves off
-it whatever its plan. When a folder's login changes (System default's too), its windows
+limit, only on an account without plan windows (a 5-hour or weekly window
+means spend is overage, not the account's limit). On such an account
+`monthly` is 100 with no reset when the org's monthly spend limit is reached
+(the endpoint's `extra_usage.spend_limit_reached`): Claude refuses every turn
+there, and the automatic switch moves off it. A Team seat with plan windows
+keeps running on them when that flag is set (it only stops overage), so its
+`monthly` stays null. When a folder's login changes (System default's too), its windows
 empty until it's read again: no number survives from the old login.
 
 ### Each usage window

@@ -183,14 +183,15 @@ export function parseUsageResponse(data) {
   const spend = fromSpend(d.spend);
   const legacy = fromExtraUsage(d.extra_usage);
   const extra = spend ?? legacy;
-  // With plan windows, spend is overage after a cap, not the account's limit.
-  // The org's monthly spend limit reached blocks the account whatever its
-  // windows say ("You've hit your org's monthly spend limit"): a full window.
+  // With plan windows, spend is overage after a cap, not the account's limit:
+  // the org's spend limit reached (extra usage off) only stops overage, and a
+  // Team seat keeps running on its 5-hour and weekly windows. Without plan
+  // windows the spend limit is the account's only limit: a full window.
   const spendLimitReached = (isObject(d.extra_usage) && d.extra_usage.spend_limit_reached === true) ||
     (isObject(d.spend) && d.spend.spend_limit_reached === true);
-  const monthly = spendLimitReached
-    ? { percent: 100, resetsAt: null }
-    : session || weekly ? null : (spendWindow(spend) ?? spendWindow(legacy));
+  const monthly = session || weekly
+    ? null
+    : spendLimitReached ? { percent: 100, resetsAt: null } : (spendWindow(spend) ?? spendWindow(legacy));
   return {
     usage: { session, weekly, fable, monthly },
     credits: extra ? { balance: extra.balance, limit: extra.limit, ...(extra.spendLimited ? { spendLimited: true } : {}) } : null,
