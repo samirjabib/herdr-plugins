@@ -440,7 +440,17 @@ export function sleepersOf(list) {
 // A sleeper's tooltip: how long it has slept, its recap's first lines, and what a click does.
 export function sleepTip(s, ago) {
   const recap = (s.recap ?? "").split("\n").map((l) => l.trim()).filter((l) => l && !/^RECAP-/.test(l)).slice(0, 4);
-  return [`Asleep${ago ? ` ${ago}` : ""} · summary saved in Engram`, ...recap, "Wake resumes it: same conversation, same tab"].join("\n");
+  return [`Asleep${ago ? ` ${ago}` : ""} · summary saved in Engram`, ...recap, "Click (or Wake) resumes it: same conversation, same tab"].join("\n");
+}
+
+// What a sleeper's row shows after `ws agent wake <name>` (exec's { code, stdout, stderr }, an
+// Error, or null when exec could not run): null when it woke, else the error, stderr's last line.
+export function wakeError(r) {
+  if (r instanceof Error) return r.message || "ws agent wake could not run";
+  if (!r) return "ws agent wake could not run";
+  if (r.code === 0) return null;
+  const last = String(r.stderr ?? "").split("\n").map((l) => l.trim()).filter(Boolean).pop();
+  return last || `ws agent wake failed (exit ${r.code})`;
 }
 
 // terminal -> when auto-sleep will put it to sleep (epoch ms), from the core's /api/agents
