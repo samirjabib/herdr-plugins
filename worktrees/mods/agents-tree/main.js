@@ -7,7 +7,7 @@ import { View, div, image, svg } from "gpui-kit";
 import { v_flex, h_flex } from "gpui-base";
 import { agents, terminals, panes, focused, spaces, run, theme, shared, setShared, setAgentOrder, openOverlay, closeOverlay, props, window, layout, exec, hc, readTextFile, checking } from "herdr";
 import * as fs from "fs/promises";
-import { helperLabels, helperBadge, projectLook, roleMark, roleOf, placeOf, orchOf, orgRootOf, isJob, buildTree, headBranch, hasGithub, projectSummary, parsePs, processTree, plumbingNote, procTotal, formatMem, bgState, bgLabel, bgVisible, sleepersOf, sleepTip, sleepEtas, sleepsIn, asleepIn, jobInfo, jobRunsOf, jobRunTip } from "./model.js";
+import { helperLabels, helperBadge, projectLook, roleMark, roleOf, placeOf, orchOf, orgRootOf, isJob, buildTree, headBranch, hasGithub, projectSummary, parsePs, processTree, plumbingNote, procTotal, formatMem, bgState, bgLabel, bgVisible, sleepersOf, sleepTip, wakeError, sleepEtas, sleepsIn, asleepIn, jobInfo, jobRunsOf, jobRunTip } from "./model.js";
 import { historyUrl, ingestHistory, historyItems, clearDots, liveFlights, flightRows, dotTip, emptyFlights, FLIGHT_MS } from "./flight.js";
 
 function find(node, id) {
@@ -122,6 +122,7 @@ export default class Agents extends View {
     this.helpersOpen = new Set(); // owners whose helpers are unfolded as rows
     // Finished terminals dismissed with their ×: hidden at once, and removed with `hc rm`.
     this.dismissed = new Set();
+    this.wakeErrors = new Map(); // sleeper name -> its last failed wake's error (shown on its row)
     // Each agent's last state and when it changed (ms), kept across restarts.
     try { this.changed = JSON.parse(localStorage.getItem("changed") ?? "{}"); } catch { this.changed = {}; }
     if (!this.changed || typeof this.changed !== "object" || Array.isArray(this.changed)) this.changed = {};
@@ -568,24 +569,40 @@ export default class Agents extends View {
         .frames(["z", "zz", "zzz", "zzz"], 650).loop("opacity", { from: 0.35, to: 1, period: 2600 }));
   }
 
-  // The Wake button of a sleeper (`ws agent wake <name>`).
+  // Wake a sleeper (`ws agent wake <name>`), from a click on its row or its Wake button. One wake
+  // at a time; a failed one keeps its error on the row (wakeErrors) until the next try.
+  wake(s, cx) {
+    if (this.waking) return;
+    this.waking = s.name;
+    this.wakeErrors.delete(s.name);
+    cx.notify();
+    cx.spawn(async (cx) => {
+      const r = await exec("/bin/zsh", ["-c", '"$HOME/mac-workspace/bin/ws" agent wake "$1"', "wake", s.name]).catch((e) => e);
+      const err = wakeError(r);
+      if (err) this.wakeErrors.set(s.name, err);
+      this.waking = null;
+      await this.refreshSleepers?.(cx);
+      cx.notify();
+    });
+  }
+
+  // The Wake button of a sleeper.
   wakeButton(t, s) {
     return div().id(`wake-${s.name}`).flex_none().px(7).h(20).rounded(5).flex().items_center()
       .text_size(11).bg(t.accent + "24").text_color(t.accent).cursor_pointer()
       .hover((el) => el.bg(t.accent + "40"))
       .on_click((_e, cx) => {
         cx.stop_propagation();
-        if (this.waking) return;
-        this.waking = s.name;
-        cx.notify();
-        cx.spawn(async (cx) => {
-          await exec("/bin/zsh", ["-c", '"$HOME/mac-workspace/bin/ws" agent wake "$1"', "wake", s.name]).catch(() => null);
-          this.waking = null;
-          await this.refreshSleepers?.(cx);
-          cx.notify();
-        });
+        this.wake(s, cx);
       })
-      .child("Wake");
+      .child(this.wakeErrors.has(s.name) ? "Retry" : "Wake");
+  }
+
+  // A failed wake's error on its row: "wake failed" in red, the whole error on hover.
+  wakeFailed(t, s) {
+    const err = this.wakeErrors.get(s.name);
+    return err ? div().id(`wake-err-${s.name}`).flex_none().max_w(150).truncate().text_size(11).text_color(t.blocked)
+      .tooltip(`Wake failed: ${err}\nClick the row to try again`).child(`wake failed: ${err}`) : null;
   }
 
   // A sleeping agent: the Claude icon dimmed with a zzz floating over it, its task in grey and
@@ -596,13 +613,15 @@ export default class Agents extends View {
     const key = `sleep-${s.name}`;
     const ago = s.since > 1e12 ? duration(now - s.since) : "";
     const waking = this.waking === s.name;
-    return h_flex().id(key).px(8).h(30).flex_none().rounded(8).items_center().gap(7)
+    const failed = waking ? null : this.wakeFailed(t, s);
+    return h_flex().id(key).px(8).h(30).flex_none().rounded(8).items_center().gap(7).cursor_pointer()
       .hover((el) => el.bg(t.hover))
       .on_hover((on, cx) => {
         if (on) this.hovered = key;
         else if (this.hovered === key) this.hovered = null;
         cx.notify();
       })
+      .on_click((_e, cx) => this.wake(s, cx))
       .tooltip(sleepTip(s, ago))
       .child(this.sleepIcon(t))
       .child(h_flex().flex_1().min_w(0).gap(5).items_center()
@@ -610,8 +629,9 @@ export default class Agents extends View {
         .when(Boolean(mark), (el) => el.child(mark)))
       .when(Boolean(badge), (el) => el.child(badge))
       .when(waking, (el) => el.child(div().flex_none().text_size(11).text_color(t.accent).frames(["waking", "waking.", "waking..", "waking..."], 300)))
+      .when(Boolean(failed), (el) => el.child(failed))
       .when(!waking && this.hovered === key, (el) => el.child(this.wakeButton(t, s)))
-      .when(!waking && this.hovered !== key && Boolean(ago), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(ago)));
+      .when(!waking && !failed && this.hovered !== key && Boolean(ago), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(ago)));
   }
 
   // A background terminal (no agent status: a dev server, a test run an agent started with
@@ -763,6 +783,7 @@ export default class Agents extends View {
     const hover = this.hovered === key;
     const ago = look.asleep && lead.since > 1e12 ? duration(now - lead.since) : "";
     const waking = look.asleep && this.waking === lead.name;
+    const failed = look.asleep && !waking ? this.wakeFailed(t, lead) : null;
     const dot = live ? this.messageDot(t, live.address) : null;
     const history = live ? this.historyButton(t, live.address, hover) : null;
     const el = h_flex().id(key).relative().children(live ? this.flightLayers(t, live.address) : [])
@@ -775,7 +796,7 @@ export default class Agents extends View {
       })
       .when(Boolean(live?.focused), (el) => el.bg(t.selected))
       .tooltip(look.asleep ? sleepTip(lead, ago) : live ? `${p.name} on main${leadTask ? `: ${leadTask}` : ""}. Its worktrees hang under it` : `${p.name}: nothing on main`)
-      .on_click(() => (live ? run("pane.focus", { pane: live.pane }) : !lead && space && run("space.select", { id: space })))
+      .on_click((_e, cx) => (live ? run("pane.focus", { pane: live.pane }) : look.asleep ? this.wake(lead, cx) : !lead && space && run("space.select", { id: space })))
       .child(pic)
       .child(div().min_w(0).flex_shrink(1).truncate().text_color(look.dim ? t.dim : idle ? t.muted : t.foreground).child(look.name))
       .when(Boolean(look.tag), (el) => el.child(placeChip(t, `${key}-main`, look.tag)))
@@ -792,8 +813,9 @@ export default class Agents extends View {
       .when(Boolean(history), (el) => el.child(history))
       .when(Boolean(live), (el) => el.child(this.status(t, live, true)))
       .when(waking, (el) => el.child(div().flex_none().text_size(11).text_color(t.accent).frames(["waking", "waking.", "waking..", "waking..."], 300)))
+      .when(Boolean(failed), (el) => el.child(failed))
       .when(look.asleep && !waking && hover, (el) => el.child(this.wakeButton(t, lead)))
-      .when(look.asleep && !waking && !hover && Boolean(ago), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(ago)));
+      .when(look.asleep && !waking && !failed && !hover && Boolean(ago), (el) => el.child(div().flex_none().text_size(11).text_color(t.dim).child(ago)));
     return live ? this.withHistory(t, live.address, el) : el;
   }
 

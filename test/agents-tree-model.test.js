@@ -335,8 +335,8 @@ test("sleepersOf keeps the core's sleeping agents as tree extras under their che
 
 test("sleepTip says how long, the recap's first lines, and that a click wakes it", () => {
   const tip = sleepTip({ recap: "RECAP-BEGIN ab\nGoal: ship\nDone: a\nNext: b\nOpen questions: none\nmore\nRECAP-END ab" }, "1h");
-  assert.equal(tip, "Asleep 1h · summary saved in Engram\nGoal: ship\nDone: a\nNext: b\nOpen questions: none\nWake resumes it: same conversation, same tab");
-  assert.equal(sleepTip({ recap: null }, ""), "Asleep · summary saved in Engram\nWake resumes it: same conversation, same tab");
+  assert.equal(tip, "Asleep 1h · summary saved in Engram\nGoal: ship\nDone: a\nNext: b\nOpen questions: none\nClick (or Wake) resumes it: same conversation, same tab");
+  assert.equal(sleepTip({ recap: null }, ""), "Asleep · summary saved in Engram\nClick (or Wake) resumes it: same conversation, same tab");
 });
 
 test("sleepEtas maps each live agent's terminal to when auto-sleep takes it", () => {
