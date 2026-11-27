@@ -1,0 +1,5 @@
+{
+  "place": "none",
+  "title": "Org links",
+  "link_handlers": [{ "kind": "url", "pattern": "(?i)^https?://" }]
+}

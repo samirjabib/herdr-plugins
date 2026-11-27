@@ -2,6 +2,9 @@
   "id": "root",
   "type": "row",
   "titlebar": "none",
+  "link_handlers": [
+    "org-links"
+  ],
   "traffic_lights": [
     12,
     16
